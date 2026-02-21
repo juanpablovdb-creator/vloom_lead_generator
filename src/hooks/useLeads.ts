@@ -1,0 +1,391 @@
+// =====================================================
+// LEADFLOW - useLeads Hook
+// =====================================================
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { supabase } from '@/lib/supabase';
+import type { Lead, LeadFilters, LeadSort, PaginationState, LeadStatus } from '@/types/database';
+
+const SUPABASE_NOT_CONFIGURED = 'Configure Supabase: add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env';
+
+interface UseLeadsOptions {
+  initialFilters?: LeadFilters;
+  initialSort?: LeadSort;
+  pageSize?: number;
+}
+
+interface UseLeadsReturn {
+  // Data
+  leads: Lead[];
+  totalCount: number;
+  isLoading: boolean;
+  error: string | null;
+  
+  // Filters
+  filters: LeadFilters;
+  setFilters: (filters: LeadFilters) => void;
+  updateFilter: <K extends keyof LeadFilters>(key: K, value: LeadFilters[K]) => void;
+  clearFilters: () => void;
+  
+  // Sorting
+  sort: LeadSort;
+  setSort: (sort: LeadSort) => void;
+  
+  // Pagination
+  pagination: PaginationState;
+  setPage: (page: number) => void;
+  setPageSize: (size: number) => void;
+  
+  // Actions
+  refreshLeads: () => Promise<void>;
+  updateLead: (id: string, updates: Partial<Lead>) => Promise<void>;
+  deleteLead: (id: string) => Promise<void>;
+  deleteLeads: (ids: string[]) => Promise<void>;
+  updateLeadStatus: (id: string, status: LeadStatus) => Promise<void>;
+  toggleShare: (id: string) => Promise<void>;
+  addTag: (id: string, tag: string) => Promise<void>;
+  removeTag: (id: string, tag: string) => Promise<void>;
+  
+  // Selection
+  selectedIds: Set<string>;
+  toggleSelection: (id: string) => void;
+  selectAll: () => void;
+  clearSelection: () => void;
+  isAllSelected: boolean;
+}
+
+const DEFAULT_FILTERS: LeadFilters = {
+  show_shared: true,
+};
+
+const DEFAULT_SORT: LeadSort = {
+  column: 'score',
+  direction: 'desc',
+};
+
+export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
+  const {
+    initialFilters = DEFAULT_FILTERS,
+    initialSort = DEFAULT_SORT,
+    pageSize: initialPageSize = 25,
+  } = options;
+
+  // State
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<LeadFilters>(initialFilters);
+  const [sort, setSort] = useState<LeadSort>(initialSort);
+  const [pagination, setPagination] = useState<PaginationState>({
+    page: 1,
+    pageSize: initialPageSize,
+    total: 0,
+  });
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Build query based on filters (only when Supabase is configured)
+  const buildQuery = useCallback(() => {
+    if (!supabase) return null;
+    let query = supabase
+      .from('leads')
+      .select('*', { count: 'exact' });
+
+    // Status filter
+    if (filters.status && filters.status.length > 0) {
+      query = query.in('status', filters.status);
+    }
+
+    // Source filter
+    if (filters.source && filters.source.length > 0) {
+      query = query.in('job_source', filters.source);
+    }
+
+    // Company size filter
+    if (filters.company_size && filters.company_size.length > 0) {
+      query = query.in('company_size', filters.company_size);
+    }
+
+    // Industry filter
+    if (filters.industry && filters.industry.length > 0) {
+      query = query.in('company_industry', filters.industry);
+    }
+
+    // Has email filter
+    if (filters.has_email === true) {
+      query = query.not('contact_email', 'is', null);
+    } else if (filters.has_email === false) {
+      query = query.is('contact_email', null);
+    }
+
+    // Has LinkedIn filter
+    if (filters.has_linkedin === true) {
+      query = query.not('contact_linkedin_url', 'is', null);
+    } else if (filters.has_linkedin === false) {
+      query = query.is('contact_linkedin_url', null);
+    }
+
+    // Score range filter
+    if (filters.score_min !== undefined) {
+      query = query.gte('score', filters.score_min);
+    }
+    if (filters.score_max !== undefined) {
+      query = query.lte('score', filters.score_max);
+    }
+
+    // Date range filter
+    if (filters.date_from) {
+      query = query.gte('created_at', filters.date_from);
+    }
+    if (filters.date_to) {
+      query = query.lte('created_at', filters.date_to);
+    }
+
+    // Search filter (busca en múltiples campos)
+    if (filters.search) {
+      const searchTerm = `%${filters.search}%`;
+      query = query.or(
+        `job_title.ilike.${searchTerm},company_name.ilike.${searchTerm},contact_name.ilike.${searchTerm},contact_email.ilike.${searchTerm}`
+      );
+    }
+
+    // Tags filter
+    if (filters.tags && filters.tags.length > 0) {
+      query = query.contains('tags', filters.tags);
+    }
+
+    // Sorting
+    query = query.order(sort.column, { ascending: sort.direction === 'asc' });
+
+    // Pagination
+    const from = (pagination.page - 1) * pagination.pageSize;
+    const to = from + pagination.pageSize - 1;
+    query = query.range(from, to);
+
+    return query;
+  }, [filters, sort, pagination.page, pagination.pageSize]);
+
+  // Fetch leads
+  const fetchLeads = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    if (!supabase) {
+      setLeads([]);
+      setTotalCount(0);
+      setPagination(prev => ({ ...prev, total: 0 }));
+      setError(SUPABASE_NOT_CONFIGURED);
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const query = buildQuery();
+      if (!query) {
+        setLeads([]);
+        setTotalCount(0);
+        setIsLoading(false);
+        return;
+      }
+      const { data, error: queryError, count } = await query;
+
+      if (queryError) throw queryError;
+
+      setLeads(data || []);
+      setTotalCount(count || 0);
+      setPagination(prev => ({ ...prev, total: count || 0 }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch leads');
+      console.error('Error fetching leads:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [buildQuery]);
+
+  // Initial fetch and refetch on filter/sort/pagination changes
+  useEffect(() => {
+    fetchLeads();
+  }, [fetchLeads]);
+
+  // Realtime subscription (only when Supabase is configured)
+  useEffect(() => {
+    if (!supabase) return;
+    const channel = supabase
+      .channel('leads-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'leads',
+        },
+        () => {
+          fetchLeads();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchLeads]);
+
+  // Filter helpers
+  const updateFilter = useCallback(<K extends keyof LeadFilters>(
+    key: K,
+    value: LeadFilters[K]
+  ) => {
+    setFilters(prev => ({ ...prev, [key]: value }));
+    setPagination(prev => ({ ...prev, page: 1 })); // Reset to page 1 on filter change
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setFilters(DEFAULT_FILTERS);
+    setPagination(prev => ({ ...prev, page: 1 }));
+  }, []);
+
+  // Pagination helpers
+  const setPage = useCallback((page: number) => {
+    setPagination(prev => ({ ...prev, page }));
+  }, []);
+
+  const setPageSize = useCallback((pageSize: number) => {
+    setPagination(prev => ({ ...prev, pageSize, page: 1 }));
+  }, []);
+
+  // CRUD operations (no-op when Supabase not configured)
+  const updateLead = useCallback(async (id: string, updates: Partial<Lead>) => {
+    if (!supabase) return;
+    const { error: updateError } = await supabase
+      .from('leads')
+      .update(updates)
+      .eq('id', id);
+
+    if (updateError) throw updateError;
+
+    setLeads(prev => prev.map(lead =>
+      lead.id === id ? { ...lead, ...updates } : lead
+    ));
+  }, []);
+
+  const deleteLead = useCallback(async (id: string) => {
+    if (!supabase) return;
+    const { error: deleteError } = await supabase
+      .from('leads')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) throw deleteError;
+
+    setLeads(prev => prev.filter(lead => lead.id !== id));
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const deleteLeads = useCallback(async (ids: string[]) => {
+    if (!supabase) return;
+    const { error: deleteError } = await supabase
+      .from('leads')
+      .delete()
+      .in('id', ids);
+
+    if (deleteError) throw deleteError;
+
+    setLeads(prev => prev.filter(lead => !ids.includes(lead.id)));
+    setSelectedIds(new Set());
+  }, []);
+
+  const updateLeadStatus = useCallback(async (id: string, status: LeadStatus) => {
+    await updateLead(id, { status });
+  }, [updateLead]);
+
+  const toggleShare = useCallback(async (id: string) => {
+    const lead = leads.find(l => l.id === id);
+    if (!lead) return;
+    
+    await updateLead(id, { is_shared: !lead.is_shared });
+  }, [leads, updateLead]);
+
+  const addTag = useCallback(async (id: string, tag: string) => {
+    const lead = leads.find(l => l.id === id);
+    if (!lead) return;
+    
+    const newTags = [...new Set([...lead.tags, tag])];
+    await updateLead(id, { tags: newTags });
+  }, [leads, updateLead]);
+
+  const removeTag = useCallback(async (id: string, tag: string) => {
+    const lead = leads.find(l => l.id === id);
+    if (!lead) return;
+    
+    const newTags = lead.tags.filter(t => t !== tag);
+    await updateLead(id, { tags: newTags });
+  }, [leads, updateLead]);
+
+  // Selection helpers
+  const toggleSelection = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds(new Set(leads.map(l => l.id)));
+  }, [leads]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const isAllSelected = useMemo(() => {
+    return leads.length > 0 && leads.every(l => selectedIds.has(l.id));
+  }, [leads, selectedIds]);
+
+  return {
+    // Data
+    leads,
+    totalCount,
+    isLoading,
+    error,
+    
+    // Filters
+    filters,
+    setFilters,
+    updateFilter,
+    clearFilters,
+    
+    // Sorting
+    sort,
+    setSort,
+    
+    // Pagination
+    pagination,
+    setPage,
+    setPageSize,
+    
+    // Actions
+    refreshLeads: fetchLeads,
+    updateLead,
+    deleteLead,
+    deleteLeads,
+    updateLeadStatus,
+    toggleShare,
+    addTag,
+    removeTag,
+    
+    // Selection
+    selectedIds,
+    toggleSelection,
+    selectAll,
+    clearSelection,
+    isAllSelected,
+  };
+}

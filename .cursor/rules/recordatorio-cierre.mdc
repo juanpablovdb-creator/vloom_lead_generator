@@ -1,0 +1,14 @@
+---
+description: Recordar al usuario probar, limpiar y guardar cuando se despida
+alwaysApply: true
+---
+
+# Recordatorio al cerrar
+
+Cuando el usuario diga que se va, se despida, o indique que va a cerrar (adiós, hasta luego, cierro, bye, me voy, etc.), **siempre** recordarle:
+
+1. **Probar:** `npm run dev`
+2. **Limpiar:** `npm run lint:fix`
+3. **Guardar:** `git add .` + `git commit -m "..."`
+
+Incluir un mensaje breve de despedida antes del recordatorio.

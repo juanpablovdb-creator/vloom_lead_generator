@@ -1,0 +1,31 @@
+# Housekeeping
+
+Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
+
+---
+
+## Hecho recientemente
+
+- **Supabase opcional:** No lanzar si faltan env vars; app renderiza siempre.
+- **Tema oscuro Vloom:** Paleta dark, Inter, colores ideas.wearevloom.com.
+- **Error Boundary:** Errores no capturados muestran mensaje en vez de pantalla en blanco.
+- **Lazy load Dashboard:** Home carga sin importar useLeads/Supabase.
+- **Estructura docs:** BACKLOG, PRE_MORTEMS, DEBT, PROCESS.
+- **Lint:fix + pre-commit:** Script y hooks para lint automático.
+- **GitHub setup:** .gitignore, docs/GITHUB_SETUP.md con pasos para conectar y sincronizar.
+
+---
+
+## Pendiente de limpieza
+
+- [ ] Revisar imports no usados en componentes.
+- [ ] Unificar clases Tailwind duplicadas (vloom-* vs gray-* residuales).
+- [ ] Verificar que `supabase/migrations/001_initial_schema.sql` existe y está actualizado.
+- [ ] Añadir `SearchConfigPage`, `HomePage`, `ErrorBoundary` a la estructura en README.
+- [ ] Resolver 14 warnings de ESLint (imports no usados, handleGoHome, etc.). Ejecutar `npm run lint:fix` para ver lista.
+
+---
+
+## Deuda técnica
+
+Ver [docs/DEBT.md](DEBT.md) para el registro formal (Problema | Solución | Deadline).

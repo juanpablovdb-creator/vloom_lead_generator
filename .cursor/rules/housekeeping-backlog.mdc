@@ -1,0 +1,20 @@
+---
+description: Al terminar trabajo, actualizar HOUSEKEEPING y BACKLOG automáticamente
+alwaysApply: true
+---
+
+# Housekeeping y Backlog (responsabilidad del agente)
+
+Cuando completes una tarea, feature o cambio significativo:
+
+1. **Actualiza `docs/HOUSEKEEPING.md`:**
+   - Añade a "Hecho recientemente" un resumen de lo hecho
+   - Actualiza "Pendiente de limpieza" si quedó algo
+   - Si creamos deuda técnica, añade entrada en `docs/DEBT.md`
+
+2. **Actualiza `docs/BACKLOG.md`:**
+   - Marca con `[x]` los items de "Wave actual" que completamos
+   - Añade a "Backlog" o "Wave actual" si empezamos algo nuevo
+   - Mueve items a "Completado" si aplica
+
+No dejes estas actualizaciones al usuario. Hazlas tú como parte de cerrar la tarea.
