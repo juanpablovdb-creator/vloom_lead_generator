@@ -107,6 +107,12 @@ export interface Lead {
   // Notes & Tags
   notes: string | null;
   tags: string[];
+
+  // Run & marking (002, 003)
+  scraping_job_id: string | null;
+  job_external_id: string | null;
+  /** Only true when user explicitly marks as lead; CRM and Leads list filter by this. */
+  is_marked_as_lead: boolean;
   
   // Timestamps
   created_at: string;
@@ -173,6 +179,7 @@ export interface ScrapingJob {
   team_id: string | null;
   actor_id: string;
   run_id: string | null;
+  saved_search_id: string | null;
   search_query: string;
   search_location: string | null;
   search_filters: Record<string, unknown>;
@@ -183,6 +190,17 @@ export interface ScrapingJob {
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
+}
+
+export interface SavedSearch {
+  id: string;
+  team_id: string;
+  user_id: string;
+  name: string;
+  actor_id: string;
+  input: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ApiKey {
@@ -204,12 +222,21 @@ export interface ApifyJobResult {
   title: string;
   company: string;
   companyUrl?: string;
+  companyLinkedinUrl?: string;
+  companyDescription?: string;
+  companySize?: string;
+  companyWebsite?: string;
   location?: string;
+  locationText?: string;
   salary?: string;
   description?: string;
   url: string;
   postedAt?: string;
+  postedAtTimestamp?: number;
   source: string;
+  /** LinkedIn job id for dedup and enrichment_data */
+  externalId?: string;
+  [key: string]: unknown;
 }
 
 export interface EnrichmentResult {
@@ -236,6 +263,9 @@ export interface EnrichmentResult {
 // UI State Types
 // =====================================================
 
+/** View mode for Leads list and CRM: by company (group by company) or by person (one row per contact). */
+export type LeadViewBy = 'company' | 'person';
+
 export interface LeadFilters {
   status?: LeadStatus[];
   source?: string[];
@@ -250,6 +280,12 @@ export interface LeadFilters {
   search?: string;
   tags?: string[];
   show_shared?: boolean;
+  /** Filter to leads from this saved search (via scraping_job.saved_search_id). */
+  saved_search_id?: string;
+  /** When true, show only rows where user marked as lead (CRM / Leads list). */
+  marked_as_lead_only?: boolean;
+  /** Leads list and CRM: view by company or by person. */
+  view_by?: LeadViewBy;
 }
 
 export interface LeadSort {
@@ -336,6 +372,11 @@ export interface Database {
         Row: ScrapingJob;
         Insert: Omit<ScrapingJob, 'id' | 'created_at'>;
         Update: Partial<Omit<ScrapingJob, 'id' | 'user_id'>>;
+      };
+      saved_searches: {
+        Row: SavedSearch;
+        Insert: Omit<SavedSearch, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<SavedSearch, 'id' | 'user_id' | 'team_id'>>;
       };
       api_keys: {
         Row: ApiKey;

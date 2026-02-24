@@ -18,6 +18,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { useLeads } from '@/hooks/useLeads';
+import { getDisplayLeadsForView } from '@/lib/leadViewUtils';
 import { LeadsTable } from '@/components/LeadsTable';
 import { FilterBar } from '@/components/FilterBar';
 import { JobSearch, JobSearchParams } from '@/components/JobSearch';
@@ -111,8 +112,16 @@ export default function DashboardPage() {
     if (filters.score_min !== undefined || filters.score_max !== undefined) count++;
     if (filters.search) count++;
     if (filters.tags?.length) count++;
+    if (filters.saved_search_id) count++;
+    if (filters.marked_as_lead_only === true) count++;
+    if (filters.view_by) count++;
     return count;
   }, [filters]);
+
+  const { displayLeads, groupSizeByLeadId } = useMemo(
+    () => getDisplayLeadsForView(leads, filters.view_by),
+    [leads, filters.view_by]
+  );
 
   // Handlers
   const handleJobSearch = useCallback(async (params: JobSearchParams) => {
@@ -342,7 +351,8 @@ export default function DashboardPage() {
 
             {/* Table */}
             <LeadsTable
-              leads={leads}
+              leads={displayLeads}
+              groupSizeByLeadId={groupSizeByLeadId}
               isLoading={isLoading}
               sort={sort}
               onSortChange={setSort}
@@ -358,6 +368,7 @@ export default function DashboardPage() {
               onStatusChange={(lead, status) => updateLeadStatus(lead.id, status)}
               onToggleShare={async (lead) => toggleShare(lead.id)}
               onViewDetails={(lead) => console.log('View details:', lead)}
+              onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
             />
 
             {/* Pagination */}

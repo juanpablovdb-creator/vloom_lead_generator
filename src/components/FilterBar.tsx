@@ -13,8 +13,12 @@ import {
   Tag,
   Calendar,
   Sliders,
+  FolderOpen,
+  Users,
+  Building,
 } from 'lucide-react';
-import type { LeadFilters, LeadStatus } from '@/types/database';
+import type { LeadFilters, LeadStatus, LeadViewBy } from '@/types/database';
+import { useSavedSearches } from '@/hooks/useSavedSearches';
 
 interface FilterBarProps {
   filters: LeadFilters;
@@ -176,6 +180,9 @@ export function FilterBar({
   onClearFilters,
   activeFilterCount,
 }: FilterBarProps) {
+  const { savedSearches } = useSavedSearches();
+  const [showSavedSearchDropdown, setShowSavedSearchDropdown] = useState(false);
+  const [showViewByDropdown, setShowViewByDropdown] = useState(false);
   const [showScoreFilter, setShowScoreFilter] = useState(false);
 
   return (
@@ -230,6 +237,110 @@ export function FilterBar({
           onChange={(values) => onFilterChange('status', values.length > 0 ? values as LeadStatus[] : undefined)}
         />
 
+        {/* Ver por: compañías o personas */}
+        <div className="relative">
+          <button
+            onClick={() => setShowViewByDropdown(!showViewByDropdown)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+              filters.view_by
+                ? 'border-vloom-accent/40 bg-vloom-accent/10 text-vloom-accent'
+                : 'border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-bg'
+            }`}
+          >
+            {filters.view_by === 'company' ? (
+              <Building className="w-4 h-4" />
+            ) : (
+              <Users className="w-4 h-4" />
+            )}
+            <span className="text-sm font-medium">
+              {filters.view_by === 'company' ? 'By companies' : 'By people'}
+            </span>
+            <ChevronDown className="w-4 h-4 ml-1" />
+          </button>
+          {showViewByDropdown && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowViewByDropdown(false)} />
+              <div className="absolute left-0 mt-2 w-44 bg-vloom-surface rounded-lg shadow-lg border border-vloom-border py-2 z-20">
+                <button
+                  onClick={() => {
+                    onFilterChange('view_by', 'person' as LeadViewBy);
+                    setShowViewByDropdown(false);
+                  }}
+                  className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
+                    filters.view_by !== 'company' ? 'text-vloom-accent font-medium bg-vloom-accent/10' : 'text-vloom-text hover:bg-vloom-bg'
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  By people
+                </button>
+                <button
+                  onClick={() => {
+                    onFilterChange('view_by', 'company' as LeadViewBy);
+                    setShowViewByDropdown(false);
+                  }}
+                  className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
+                    filters.view_by === 'company' ? 'text-vloom-accent font-medium bg-vloom-accent/10' : 'text-vloom-text hover:bg-vloom-bg'
+                  }`}
+                >
+                  <Building className="w-4 h-4" />
+                  By companies
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Saved search filter: single select */}
+        <div className="relative">
+          <button
+            onClick={() => setShowSavedSearchDropdown(!showSavedSearchDropdown)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+              filters.saved_search_id
+                ? 'border-vloom-accent/40 bg-vloom-accent/10 text-vloom-accent'
+                : 'border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-bg'
+            }`}
+          >
+            <FolderOpen className="w-4 h-4" />
+            <span className="text-sm font-medium">
+              {filters.saved_search_id
+                ? savedSearches.find((s) => s.id === filters.saved_search_id)?.name ?? 'Saved search'
+                : 'Saved search'}
+            </span>
+            <ChevronDown className="w-4 h-4 ml-1" />
+          </button>
+          {showSavedSearchDropdown && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowSavedSearchDropdown(false)} />
+              <div className="absolute left-0 mt-2 w-56 bg-vloom-surface rounded-lg shadow-lg border border-vloom-border py-2 z-20 max-h-64 overflow-y-auto">
+                <button
+                  onClick={() => {
+                    onFilterChange('saved_search_id', undefined);
+                    setShowSavedSearchDropdown(false);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-vloom-text hover:bg-vloom-bg"
+                >
+                  All
+                </button>
+                {savedSearches.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => {
+                      onFilterChange('saved_search_id', s.id);
+                      setShowSavedSearchDropdown(false);
+                    }}
+                    className={`w-full px-3 py-2 text-left text-sm flex items-center justify-between ${
+                      filters.saved_search_id === s.id ? 'text-vloom-accent font-medium bg-vloom-accent/10' : 'text-vloom-text hover:bg-vloom-bg'
+                    }`}
+                  >
+                    <span className="truncate">{s.name}</span>
+                    {filters.saved_search_id === s.id && <Check className="w-4 h-4 text-vloom-accent flex-shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
         {/* Source dropdown */}
         <FilterDropdown
           label="Source"
@@ -262,6 +373,14 @@ export function FilterBar({
           icon={Linkedin}
           value={filters.has_linkedin}
           onChange={(value) => onFilterChange('has_linkedin', value)}
+        />
+
+        {/* Only rows user marked as lead */}
+        <ToggleFilter
+          label="Leads only"
+          icon={FolderOpen}
+          value={filters.marked_as_lead_only === true}
+          onChange={(value) => onFilterChange('marked_as_lead_only', value ? true : undefined)}
         />
 
         {/* Score filter */}

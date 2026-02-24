@@ -53,6 +53,8 @@ Items preparados para la próxima. 40-60% claros.
 
 ## Completado
 
+- [x] Sidebar visible al abrir LinkedIn Jobs en Discovery (SearchConfigPage dentro de AppLayout)
+- [x] Comunicación de la plataforma en inglés (UI: filtros, CRM, leads, mensajes)
 - [x] Estructura inicial (React, Supabase, Apify, SendGrid, Claude)
 - [x] HomePage con fuentes (LinkedIn, Indeed, Glassdoor, etc.)
 - [x] SearchConfigPage con parámetros por Actor

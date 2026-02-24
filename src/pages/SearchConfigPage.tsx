@@ -41,8 +41,63 @@ interface ActorInputField {
 
 // Configuración de inputs por Actor de Apify
 const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
-  // LinkedIn Jobs Scraper - bebity/linkedin-jobs-scraper
-  // Docs: https://apify.com/bebity/linkedin-jobs-scraper
+  // HarvestAPI LinkedIn Job Search - harvestapi/linkedin-job-search
+  // Docs: https://apify.com/harvestapi/linkedin-job-search
+  'harvestapi/linkedin-job-search': [
+    {
+      key: 'jobTitles',
+      label: 'Job titles / Keywords',
+      type: 'text',
+      placeholder: 'Video Editor, Motion Designer, Content Creator...',
+      required: true,
+      helpText: 'One or more job titles. Separate multiple with commas.',
+      icon: <Search className="w-4 h-4" />,
+    },
+    {
+      key: 'locations',
+      label: 'Locations',
+      type: 'text',
+      placeholder: 'United States, Remote, New York...',
+      required: false,
+      helpText: 'Optional. Separate multiple with commas. Use full names (e.g. United Kingdom).',
+      icon: <MapPin className="w-4 h-4" />,
+    },
+    {
+      key: 'postedLimit',
+      label: 'Date posted',
+      type: 'select',
+      options: [
+        { value: 'Past 24 hours', label: 'Past 24 hours' },
+        { value: 'Past Week', label: 'Past week' },
+        { value: 'Past Month', label: 'Past month' },
+      ],
+      defaultValue: 'Past 24 hours',
+      helpText: 'Only jobs posted in this period (ideal for daily run).',
+      icon: <Clock className="w-4 h-4" />,
+    },
+    {
+      key: 'maxItems',
+      label: 'Max results',
+      type: 'number',
+      placeholder: '24',
+      defaultValue: 24,
+      helpText: 'Maximum number of jobs to fetch (e.g. 24 for daily run).',
+      icon: <Hash className="w-4 h-4" />,
+    },
+    {
+      key: 'sort',
+      label: 'Sort by',
+      type: 'select',
+      options: [
+        { value: 'date', label: 'Most recent' },
+        { value: 'relevance', label: 'Relevance' },
+      ],
+      defaultValue: 'date',
+      icon: <Filter className="w-4 h-4" />,
+    },
+  ],
+
+  // Legacy: bebity/linkedin-jobs-scraper
   'bebity/linkedin-jobs-scraper': [
     {
       key: 'searchQueries',

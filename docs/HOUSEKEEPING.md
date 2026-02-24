@@ -6,6 +6,8 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
+- **Sidebar + LinkedIn Jobs:** SearchConfigPage se muestra dentro de AppLayout (no reemplaza la app), así el panel lateral sigue visible al abrir "LinkedIn Jobs" en Discovery.
+- **Copy en inglés:** Toda la comunicación visible en la plataforma pasada a inglés (FilterBar: By people/companies, Leads only; CRMView: Table/Kanban, Marked leads only, Add VITE_SUPABASE…; CRMCard/LeadsTable: Mark as lead / Remove from leads, No name; CRMKanban: Loading…).
 - **Supabase opcional:** No lanzar si faltan env vars; app renderiza siempre.
 - **Tema oscuro Vloom:** Paleta dark, Inter, colores ideas.wearevloom.com.
 - **Error Boundary:** Errores no capturados muestran mensaje en vez de pantalla en blanco.

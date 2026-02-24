@@ -21,9 +21,10 @@ interface CRMKanbanProps {
   leads: Lead[];
   isLoading: boolean;
   onStatusChange: (leadId: string, status: LeadStatus) => Promise<void>;
+  onMarkAsLead?: (lead: Lead, value: boolean) => void;
 }
 
-export function CRMKanban({ leads, isLoading, onStatusChange }: CRMKanbanProps) {
+export function CRMKanban({ leads, isLoading, onStatusChange, onMarkAsLead }: CRMKanbanProps) {
   const [draggedLead, setDraggedLead] = useState<Lead | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<LeadStatus | null>(null);
 
@@ -74,7 +75,7 @@ export function CRMKanban({ leads, isLoading, onStatusChange }: CRMKanbanProps) 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12 text-vloom-muted text-sm">
-        Cargando…
+        Loading…
       </div>
     );
   }
@@ -110,6 +111,7 @@ export function CRMKanban({ leads, isLoading, onStatusChange }: CRMKanbanProps) 
                 key={lead.id}
                 lead={lead}
                 onDragStart={handleDragStart}
+                onMarkAsLead={onMarkAsLead}
               />
             ))}
           </div>

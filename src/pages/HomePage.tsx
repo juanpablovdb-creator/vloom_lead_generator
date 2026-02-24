@@ -33,7 +33,7 @@ const LEAD_SOURCES: LeadSource[] = [
     color: 'text-[#0A66C2]',
     bgColor: 'bg-[#0A66C2]/10',
     borderColor: 'border-vloom-border hover:border-vloom-accent/50',
-    apifyActorId: 'bebity/linkedin-jobs-scraper',
+    apifyActorId: 'harvestapi/linkedin-job-search',
   },
   {
     id: 'indeed-jobs',

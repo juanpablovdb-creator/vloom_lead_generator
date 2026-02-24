@@ -90,6 +90,9 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       .from('leads')
       .select('*', { count: 'exact' });
 
+    // Saved search filter: only leads from runs of this saved search (via scraping_job_id)
+    // saved_search_id filter is applied in fetchLeads (via scraping_job ids)
+
     // Status filter
     if (filters.status && filters.status.length > 0) {
       query = query.in('status', filters.status);
@@ -153,6 +156,11 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       query = query.contains('tags', filters.tags);
     }
 
+    // Only show rows user marked as lead (for "Leads" / CRM view)
+    if (filters.marked_as_lead_only === true) {
+      query = query.eq('is_marked_as_lead', true);
+    }
+
     // Sorting
     query = query.order(sort.column, { ascending: sort.direction === 'asc' });
 
@@ -179,12 +187,28 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     }
 
     try {
-      const query = buildQuery();
+      let query = buildQuery();
       if (!query) {
         setLeads([]);
         setTotalCount(0);
         setIsLoading(false);
         return;
+      }
+      // When filtering by saved search: get scraping_job ids for that saved search, then filter leads by them
+      if (filters.saved_search_id) {
+        const { data: jobRows } = await supabase
+          .from('scraping_jobs')
+          .select('id')
+          .eq('saved_search_id', filters.saved_search_id);
+        const jobIds = (jobRows ?? []).map((r) => r.id);
+        if (jobIds.length === 0) {
+          setLeads([]);
+          setTotalCount(0);
+          setPagination((prev) => ({ ...prev, total: 0 }));
+          setIsLoading(false);
+          return;
+        }
+        query = query.in('scraping_job_id', jobIds);
       }
       const { data, error: queryError, count } = await query;
 
@@ -194,7 +218,13 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       setTotalCount(count || 0);
       setPagination(prev => ({ ...prev, total: count || 0 }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch leads');
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof (err as { message?: string })?.message === 'string'
+            ? (err as { message: string }).message
+            : 'Failed to fetch leads';
+      setError(message);
       console.error('Error fetching leads:', err);
     } finally {
       setIsLoading(false);
