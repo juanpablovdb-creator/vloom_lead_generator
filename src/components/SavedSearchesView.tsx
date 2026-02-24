@@ -16,7 +16,7 @@ export interface SavedSearchesViewProps {
 }
 
 export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesViewProps) {
-  const { savedSearches, isLoading, error, refetch, createSavedSearch, deleteSavedSearch } = useSavedSearches();
+  const { savedSearches, isLoading, error, createSavedSearch, deleteSavedSearch } = useSavedSearches();
   const [runningId, setRunningId] = useState<string | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');

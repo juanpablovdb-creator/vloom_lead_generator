@@ -24,7 +24,7 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 - [ ] Unificar clases Tailwind duplicadas (vloom-* vs gray-* residuales).
 - [ ] Verificar que `supabase/migrations/001_initial_schema.sql` existe y está actualizado.
 - [ ] Añadir `SearchConfigPage`, `HomePage`, `ErrorBoundary` a la estructura en README.
-- [ ] Resolver 14 warnings de ESLint (imports no usados, handleGoHome, etc.). Ejecutar `npm run lint:fix` para ver lista.
+- [x] Resolver 14 warnings de ESLint (imports no usados, deps en hooks): corregidos.
 
 ---
 

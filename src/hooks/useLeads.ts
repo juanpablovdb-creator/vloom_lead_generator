@@ -229,7 +229,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [buildQuery]);
+  }, [buildQuery, filters.saved_search_id]);
 
   // Initial fetch and refetch on filter/sort/pagination changes
   useEffect(() => {

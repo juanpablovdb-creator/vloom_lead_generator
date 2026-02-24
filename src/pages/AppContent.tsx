@@ -7,7 +7,7 @@ import type { SectionId, DiscoverySubId } from '@/components/Layout';
 import { HomePage, LeadSource } from '@/pages/HomePage';
 import { SearchConfigPage } from '@/pages/SearchConfigPage';
 import { CRMView } from '@/components/CRM';
-import { runLinkedInJobSearch, type RunLinkedInSearchResult } from '@/lib/apify';
+import { runLinkedInJobSearch } from '@/lib/apify';
 import { SavedSearchesView } from '@/components/SavedSearchesView';
 
 type View = 'app' | 'search-config';

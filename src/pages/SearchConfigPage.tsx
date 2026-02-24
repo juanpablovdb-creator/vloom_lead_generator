@@ -6,7 +6,7 @@
 // Documentación: https://apify.com/store
 // =====================================================
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ArrowLeft,
   Search,
@@ -236,7 +236,10 @@ export function SearchConfigPage({ source, onBack, onSearch }: SearchConfigPageP
   const [isSearching, setIsSearching] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const inputSchema = ACTOR_INPUT_SCHEMAS[source.apifyActorId] || [];
+  const inputSchema = useMemo(
+    () => ACTOR_INPUT_SCHEMAS[source.apifyActorId] || [],
+    [source.apifyActorId]
+  );
 
   // Initialize default values
   React.useEffect(() => {
@@ -247,7 +250,7 @@ export function SearchConfigPage({ source, onBack, onSearch }: SearchConfigPageP
       }
     });
     setFormData(defaults);
-  }, [source.apifyActorId]);
+  }, [source.apifyActorId, inputSchema]);
 
   const handleChange = (key: string, value: unknown) => {
     setFormData((prev) => ({ ...prev, [key]: value }));

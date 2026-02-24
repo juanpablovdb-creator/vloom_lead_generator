@@ -2,7 +2,7 @@
 // LEADFLOW - Apify Client
 // =====================================================
 import { supabase } from './supabase';
-import type { ApifyJobResult, ScrapingJob } from '@/types/database';
+import type { ApifyJobResult } from '@/types/database';
 
 /** Params for running LinkedIn job search (HarvestAPI). From New Search form or saved_searches.input */
 export interface RunLinkedInSearchInput {

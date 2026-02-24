@@ -5,13 +5,10 @@ import React, { useState, useMemo, useCallback } from 'react';
 import {
   Search,
   Plus,
-  Download,
-  Upload,
   Settings,
   Users,
   BarChart3,
   Mail,
-  Sparkles,
   RefreshCw,
   Trash2,
   Share2,
@@ -24,7 +21,7 @@ import { FilterBar } from '@/components/FilterBar';
 import { JobSearch, JobSearchParams } from '@/components/JobSearch';
 import { ScoringConfig } from '@/components/ScoringConfig';
 import { EmailComposer } from '@/components/EmailComposer';
-import type { Lead, LeadStatus, ScoreWeights, ScoringPreset, EmailTemplate } from '@/types/database';
+import type { Lead, ScoreWeights, ScoringPreset, EmailTemplate } from '@/types/database';
 
 // Mock data for development - remove when connecting to Supabase
 const MOCK_TEMPLATES: EmailTemplate[] = [
@@ -86,7 +83,6 @@ export default function DashboardPage() {
     setSort,
     pagination,
     setPage,
-    setPageSize,
     refreshLeads,
     updateLead,
     deleteLead,

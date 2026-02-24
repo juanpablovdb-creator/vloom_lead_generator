@@ -11,7 +11,6 @@ import {
   Linkedin,
   Building2,
   Tag,
-  Calendar,
   Sliders,
   FolderOpen,
   Users,
