@@ -1,5 +1,5 @@
 // =====================================================
-// Vloom Lead Generator - CRM view (Kanban + Tabla + useLeads)
+// Leadflow Vloom - CRM view (Kanban + Tabla + useLeads)
 // =====================================================
 import { useState, useMemo } from 'react';
 import { LayoutGrid, List } from 'lucide-react';

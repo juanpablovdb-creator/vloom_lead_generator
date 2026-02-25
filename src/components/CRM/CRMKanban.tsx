@@ -1,5 +1,5 @@
 // =====================================================
-// Vloom Lead Generator - CRM Kanban (pipeline)
+// Leadflow Vloom - CRM Kanban (pipeline)
 // =====================================================
 import { useCallback, useMemo, useState } from 'react';
 import { CRMCard } from './CRMCard';

@@ -1,7 +1,7 @@
 // =====================================================
-// LEADFLOW - SendGrid Client
+// Leadflow Vloom - SendGrid Client
 // =====================================================
-import { supabase } from './supabase';
+import { supabase, getCurrentUser } from './supabase';
 import type { Lead, EmailSent } from '@/types/database';
 
 const SENDGRID_API_URL = 'https://api.sendgrid.com/v3';
@@ -112,19 +112,13 @@ export class SendGridClient {
 
 // Factory function
 export async function createSendGridClient(): Promise<SendGridClient> {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('team_id')
-    .single();
-
-  if (!profile?.team_id) {
-    throw new Error('No team found');
-  }
+  const user = await getCurrentUser();
+  if (!user || !supabase) throw new Error('You must be logged in.');
 
   const { data: apiKey } = await supabase
     .from('api_keys')
     .select('api_key_encrypted')
-    .eq('team_id', profile.team_id)
+    .eq('user_id', user.id)
     .eq('service', 'sendgrid')
     .eq('is_active', true)
     .single();
@@ -136,7 +130,7 @@ export async function createSendGridClient(): Promise<SendGridClient> {
   return new SendGridClient(apiKey.api_key_encrypted);
 }
 
-// Enviar email a un lead y guardar en historial
+// Send email to a lead and save to history
 export async function sendEmailToLead(params: {
   lead: Lead;
   subject: string;
@@ -165,7 +159,7 @@ export async function sendEmailToLead(params: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  // Guardar en historial
+  // Save to history
   const emailRecord: Omit<EmailSent, 'id' | 'created_at' | 'updated_at'> = {
     user_id: user.id,
     lead_id: lead.id,
@@ -199,7 +193,7 @@ export async function sendEmailToLead(params: {
   return savedEmail;
 }
 
-// Enviar emails en bulk
+// Send emails in bulk
 export async function sendBulkEmails(params: {
   leads: Lead[];
   subject: string;

@@ -1,5 +1,5 @@
 // =====================================================
-// LEADFLOW - FilterBar Component
+// Leadflow Vloom - FilterBar Component
 // =====================================================
 import React, { useState } from 'react';
 import {
@@ -462,7 +462,7 @@ export function FilterBar({
               : 'border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-bg'
           }`}
         >
-          <span className="text-sm font-medium">Show Team Leads</span>
+          <span className="text-sm font-medium">Show shared leads</span>
         </button>
       </div>
     </div>

@@ -1,5 +1,5 @@
 // =====================================================
-// LEADFLOW - ScoringConfig Component
+// Leadflow Vloom - ScoringConfig Component
 // =====================================================
 import React, { useState, useEffect } from 'react';
 import {

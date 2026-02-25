@@ -1,14 +1,14 @@
 // =====================================================
-// LEADFLOW - Apify Client
+// Leadflow Vloom - Apify Client
 // =====================================================
-import { supabase } from './supabase';
+import { supabase, supabaseUrl, getCurrentUser } from './supabase';
 import type { ApifyJobResult } from '@/types/database';
 
 /** Params for running LinkedIn job search (HarvestAPI). From New Search form or saved_searches.input */
 export interface RunLinkedInSearchInput {
   jobTitles: string[];
   locations?: string[];
-  postedLimit?: 'Past 24 hours' | 'Past Week' | 'Past Month';
+  postedLimit?: 'Past 1 hour' | 'Past 24 hours' | 'Past Week' | 'Past Month';
   maxItems?: number;
   sort?: 'relevance' | 'date';
   workplaceType?: string[];
@@ -24,7 +24,117 @@ export interface RunLinkedInSearchResult {
   totalFromApify: number;
 }
 
+/**
+ * Run job search via Edge Function (API key stays in Edge Function Secrets).
+ * Uses fetch so we can always read the response body and show the real error on non-2xx.
+ * If the Edge Function is not deployed or unreachable, falls back to runJobSearch (requires Apify key in api_keys table).
+ */
+export async function runJobSearchViaEdge(options: {
+  actorId: string;
+  input?: Record<string, unknown>;
+  savedSearchId?: string;
+}): Promise<RunLinkedInSearchResult> {
+  if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
+  // Force a token refresh so the Edge Function gets a valid JWT (getSession() can return expired token)
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('You must be logged in to run a search.');
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error('Session expired. Please sign in again.');
+  const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/run-job-search`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(options),
+    });
+  } catch (networkErr) {
+    const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    const isUnreachable = /fetch failed|NetworkError|Failed to fetch/i.test(msg);
+    if (isUnreachable) {
+      try {
+        return await runJobSearch(options);
+      } catch (fallbackErr) {
+        const detail = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        const needKey =
+          /API key not configured|add it in Settings/i.test(detail);
+        throw new Error(
+          needKey
+            ? `Edge Function is not deployed. Either: (1) Run "supabase functions deploy run-job-search" and set APIFY_API_TOKEN in Edge Function Secrets, or (2) Add your Apify key in the api_keys table (Supabase Table Editor). Details: ${detail}`
+            : `Edge Function unreachable. Deploy with: supabase functions deploy run-job-search and set APIFY_API_TOKEN in Secrets. If you use the fallback, add your Apify key in the api_keys table. Details: ${detail}`
+        );
+      }
+    }
+    throw new Error(msg);
+  }
+  const text = await response.text();
+  let body: {
+    error?: string | { code?: number; message?: string };
+    message?: string | Record<string, unknown>;
+    scrapingJobId?: string;
+    imported?: number;
+    skipped?: number;
+    totalFromApify?: number;
+  };
+  try {
+    body = text ? (JSON.parse(text) as typeof body) : {};
+  } catch {
+    body = {};
+  }
+  /** Always return a string for the user; avoid [object Object]. */
+  const toErrorString = (v: unknown): string => {
+    if (typeof v === 'string') return v;
+    if (v && typeof v === 'object' && 'message' in v && typeof (v as { message: unknown }).message === 'string')
+      return (v as { message: string }).message;
+    return v != null ? String(v) : '';
+  };
+  if (!response.ok) {
+    const raw =
+      typeof body?.error === 'string'
+        ? body.error
+        : typeof body?.message === 'string'
+          ? body.message
+          : body?.error != null
+            ? toErrorString(body.error)
+            : body?.message != null
+              ? toErrorString(body.message)
+              : text || `Edge Function returned ${response.status}`;
+    let message = toErrorString(raw);
+    if (!message) message = text || `Edge Function returned ${response.status}`;
+    if (response.status === 401 && /Invalid JWT|invalid.*jwt|unauthorized/i.test(message))
+      message = 'Session expired or invalid. Please sign in again.';
+    throw new Error(message);
+  }
+  if (body?.error) throw new Error(toErrorString(body.error));
+  if (body?.scrapingJobId == null) throw new Error('Invalid response from run-job-search.');
+  return {
+    scrapingJobId: body.scrapingJobId,
+    imported: body.imported ?? 0,
+    skipped: body.skipped ?? 0,
+    totalFromApify: body.totalFromApify ?? 0,
+  };
+}
+
 const APIFY_BASE_URL = 'https://api.apify.com/v2';
+
+/** API docs: actorId is username~actor-name (tilde). Normalize slash to tilde for URL. */
+function toApifyActorId(actorId: string): string {
+  return actorId.includes('/') ? actorId.replace('/', '~') : actorId;
+}
+
+/** Map UI postedLimit to Apify Actor schema: "1h" | "24h" | "week" | "month" */
+function mapPostedLimitToApify(postedLimit: string): string {
+  const s = (postedLimit || '').toLowerCase();
+  if (s.includes('1h') || s.includes('1 hour')) return '1h';
+  if (s.includes('24') || s === '24h') return '24h';
+  if (s.includes('week') || s === 'week') return 'week';
+  if (s.includes('month') || s === 'month') return 'month';
+  return '1h';
+}
 
 // Actors recomendados para job scraping
 export const APIFY_ACTORS = {
@@ -40,14 +150,25 @@ export const APIFY_ACTORS = {
 interface ApifyRunOptions {
   actorId: string;
   input: Record<string, unknown>;
-  waitForFinish?: boolean;
-  timeoutSecs?: number;
 }
 
 interface ApifyRunResult {
   runId: string;
   status: string;
   datasetId?: string;
+}
+
+const APIFY_POLL_INTERVAL_MS = 5000;
+const APIFY_POLL_TIMEOUT_MS = 600_000;
+
+function parseApifyError(errText: string): string {
+  try {
+    const body = JSON.parse(errText) as { error?: { message?: string } };
+    if (body?.error?.message) return body.error.message;
+  } catch {
+    // use errText as-is
+  }
+  return errText;
 }
 
 export class ApifyClient {
@@ -57,30 +178,31 @@ export class ApifyClient {
     this.apiKey = apiKey;
   }
 
-  // Iniciar un actor
-  async runActor(options: ApifyRunOptions): Promise<ApifyRunResult> {
-    const { actorId, input, waitForFinish = false, timeoutSecs = 300 } = options;
+  private get headers(): Record<string, string> {
+    return { Authorization: `Bearer ${this.apiKey}` };
+  }
 
-    const url = `${APIFY_BASE_URL}/acts/${actorId}/runs?token=${this.apiKey}`;
-    
+  /** Start an actor run. Body is input only; waitForFinish is a query param (max 60s). */
+  async runActor(options: ApifyRunOptions): Promise<ApifyRunResult> {
+    const { actorId, input } = options;
+    const actorIdForUrl = toApifyActorId(actorId);
+    const url = `${APIFY_BASE_URL}/acts/${actorIdForUrl}/runs?waitForFinish=60`;
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...this.headers,
       },
-      body: JSON.stringify({
-        ...input,
-        ...(waitForFinish && { waitForFinish: timeoutSecs }),
-      }),
+      body: JSON.stringify(input),
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Apify error: ${error}`);
+      const errText = await response.text();
+      throw new Error(`Apify error: ${parseApifyError(errText)}`);
     }
 
     const data = await response.json();
-    
     return {
       runId: data.data.id,
       status: data.data.status,
@@ -88,45 +210,62 @@ export class ApifyClient {
     };
   }
 
-  // Obtener estado de un run
+  /** Get run status (and defaultDatasetId when finished). */
   async getRunStatus(runId: string): Promise<{ status: string; datasetId?: string }> {
-    const url = `${APIFY_BASE_URL}/actor-runs/${runId}?token=${this.apiKey}`;
-    
-    const response = await fetch(url);
-    
+    const response = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, {
+      headers: this.headers,
+    });
+
     if (!response.ok) {
-      throw new Error('Failed to get run status');
+      const errText = await response.text();
+      throw new Error(parseApifyError(errText) || 'Failed to get run status');
     }
 
     const data = await response.json();
-    
     return {
       status: data.data.status,
       datasetId: data.data.defaultDatasetId,
     };
   }
 
-  // Obtener resultados de un dataset
+  /** Get dataset items (JSON). */
   async getDatasetItems<T = unknown>(datasetId: string): Promise<T[]> {
-    const url = `${APIFY_BASE_URL}/datasets/${datasetId}/items?token=${this.apiKey}&format=json`;
-    
-    const response = await fetch(url);
-    
+    const response = await fetch(
+      `${APIFY_BASE_URL}/datasets/${datasetId}/items?format=json`,
+      { headers: this.headers }
+    );
+
     if (!response.ok) {
-      throw new Error('Failed to get dataset items');
+      const errText = await response.text();
+      throw new Error(parseApifyError(errText) || 'Failed to get dataset items');
     }
 
     return response.json();
   }
 
+  /** Poll run until terminal status or timeout. Returns final status and datasetId. */
+  private async pollRunUntilFinished(
+    runId: string,
+    timeoutMs: number = APIFY_POLL_TIMEOUT_MS
+  ): Promise<{ status: string; datasetId?: string }> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, APIFY_POLL_INTERVAL_MS));
+      const st = await this.getRunStatus(runId);
+      if (st.status === 'SUCCEEDED' || st.status === 'FAILED') return st;
+    }
+    return { status: 'RUNNING' };
+  }
+
   /**
    * HarvestAPI LinkedIn Job Search: job titles, locations, postedLimit (e.g. Past 24 hours).
    * No cookies, rich output. Input shape: https://apify.com/harvestapi/linkedin-job-search/input
+   * Starts the run, then polls until SUCCEEDED/FAILED (up to 600s), then returns normalized items.
    */
   async searchLinkedInJobs(params: {
     jobTitles: string[];
     locations?: string[];
-    postedLimit?: 'Past 24 hours' | 'Past Week' | 'Past Month';
+    postedLimit?: 'Past 1 hour' | 'Past 24 hours' | 'Past Week' | 'Past Month';
     maxItems?: number;
     sort?: 'relevance' | 'date';
     workplaceType?: string[];
@@ -137,9 +276,9 @@ export class ApifyClient {
     const input: Record<string, unknown> = {
       jobTitles: params.jobTitles.filter(Boolean),
       locations: params.locations?.filter(Boolean) ?? [],
-      postedLimit: params.postedLimit ?? 'Past Week',
+      postedLimit: mapPostedLimitToApify(params.postedLimit ?? 'Past Week'),
       maxItems: params.maxItems ?? 50,
-      sort: params.sort ?? 'date',
+      sortBy: params.sort ?? 'date',
     };
     if (params.workplaceType?.length) input.workplaceType = params.workplaceType;
     if (params.employmentType?.length) input.employmentType = params.employmentType;
@@ -148,15 +287,24 @@ export class ApifyClient {
     const run = await this.runActor({
       actorId: APIFY_ACTORS.LINKEDIN_JOBS,
       input,
-      waitForFinish: true,
-      timeoutSecs: 600,
     });
 
-    if (run.status !== 'SUCCEEDED' || !run.datasetId) {
-      throw new Error(`Job scraping failed with status: ${run.status}`);
+    let status = run.status;
+    let datasetId = run.datasetId;
+
+    if (status === 'RUNNING') {
+      const st = await this.pollRunUntilFinished(run.runId);
+      status = st.status;
+      datasetId = st.datasetId;
+      if (status === 'FAILED') throw new Error('Job scraping failed (Apify run failed).');
+      if (status === 'RUNNING') throw new Error('Job scraping timed out waiting for Apify run.');
     }
 
-    const items = await this.getDatasetItems<Record<string, unknown>>(run.datasetId);
+    if (status !== 'SUCCEEDED' || !datasetId) {
+      throw new Error(`Job scraping failed with status: ${status}`);
+    }
+
+    const items = await this.getDatasetItems<Record<string, unknown>>(datasetId);
     return this.normalizeHarvestApiJobs(items);
   }
 
@@ -221,7 +369,7 @@ export class ApifyClient {
     });
   }
 
-  // Buscar jobs de Indeed
+  // Search Indeed jobs
   async searchIndeedJobs(params: {
     query: string;
     location?: string;
@@ -233,18 +381,19 @@ export class ApifyClient {
       maxItems: params.limit || 50,
     };
 
-    const run = await this.runActor({
-      actorId: APIFY_ACTORS.INDEED_JOBS,
-      input,
-      waitForFinish: true,
-      timeoutSecs: 600,
-    });
-
-    if (run.status !== 'SUCCEEDED' || !run.datasetId) {
-      throw new Error(`Job scraping failed with status: ${run.status}`);
+    const run = await this.runActor({ actorId: APIFY_ACTORS.INDEED_JOBS, input });
+    let status = run.status;
+    let datasetId = run.datasetId;
+    if (status === 'RUNNING') {
+      const st = await this.pollRunUntilFinished(run.runId);
+      status = st.status;
+      datasetId = st.datasetId;
+    }
+    if (status !== 'SUCCEEDED' || !datasetId) {
+      throw new Error(`Job scraping failed with status: ${status}`);
     }
 
-    const items = await this.getDatasetItems<Record<string, unknown>>(run.datasetId);
+    const items = await this.getDatasetItems<Record<string, unknown>>(datasetId);
     
     return items.map((item) => ({
       title: (item.title || item.positionName || '') as string,
@@ -270,18 +419,19 @@ export class ApifyClient {
       profileUrls: [linkedinUrl],
     };
 
-    const run = await this.runActor({
-      actorId: APIFY_ACTORS.LINKEDIN_PROFILE,
-      input,
-      waitForFinish: true,
-      timeoutSecs: 120,
-    });
-
-    if (run.status !== 'SUCCEEDED' || !run.datasetId) {
+    const run = await this.runActor({ actorId: APIFY_ACTORS.LINKEDIN_PROFILE, input });
+    let status = run.status;
+    let datasetId = run.datasetId;
+    if (status === 'RUNNING') {
+      const st = await this.pollRunUntilFinished(run.runId, 120_000);
+      status = st.status;
+      datasetId = st.datasetId;
+    }
+    if (status !== 'SUCCEEDED' || !datasetId) {
       return null;
     }
 
-    const items = await this.getDatasetItems<Record<string, unknown>>(run.datasetId);
+    const items = await this.getDatasetItems<Record<string, unknown>>(datasetId);
     
     if (items.length === 0) return null;
 
@@ -296,21 +446,15 @@ export class ApifyClient {
   }
 }
 
-// Factory function para crear cliente con API key del team
+// Factory function para crear cliente con API key del usuario
 export async function createApifyClient(): Promise<ApifyClient> {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('team_id')
-    .single();
-
-  if (!profile?.team_id) {
-    throw new Error('No team found. Please join or create a team first.');
-  }
+  const user = await getCurrentUser();
+  if (!user || !supabase) throw new Error('You must be logged in.');
 
   const { data: apiKey } = await supabase
     .from('api_keys')
     .select('api_key_encrypted')
-    .eq('team_id', profile.team_id)
+    .eq('user_id', user.id)
     .eq('service', 'apify')
     .eq('is_active', true)
     .single();
@@ -319,16 +463,15 @@ export async function createApifyClient(): Promise<ApifyClient> {
     throw new Error('Apify API key not configured. Please add it in Settings.');
   }
 
-  // En producción, descifrar la key aquí
   return new ApifyClient(apiKey.api_key_encrypted);
 }
 
-/** Job URLs already present for this team (to avoid re-importing / re-enriching). */
-export async function getExistingJobUrls(teamId: string): Promise<Set<string>> {
+/** Job URLs already present for this user (to avoid re-importing / re-enriching). */
+export async function getExistingJobUrls(userId: string): Promise<Set<string>> {
   const { data, error } = await supabase
     .from('leads')
     .select('job_url')
-    .eq('team_id', teamId)
+    .eq('user_id', userId)
     .not('job_url', 'is', null);
 
   if (error) {
@@ -348,12 +491,9 @@ export async function getExistingJobUrls(teamId: string): Promise<Set<string>> {
 export async function saveJobsAsLeads(
   jobs: ApifyJobResult[],
   scrapingJobId: string,
-  userId: string,
-  teamId: string | null
+  userId: string
 ): Promise<{ imported: number; skipped: number }> {
-  const teamIdFilter = teamId ?? undefined;
-  const existingUrls =
-    teamIdFilter != null ? await getExistingJobUrls(teamIdFilter) : new Set<string>();
+  const existingUrls = await getExistingJobUrls(userId);
   const newJobs = jobs.filter((j) => j.url && !existingUrls.has(j.url));
 
   const leads = newJobs.map((job) => {
@@ -364,7 +504,6 @@ export async function saveJobsAsLeads(
 
     return {
       user_id: userId,
-      team_id: teamId,
       is_shared: false,
       scraping_job_id: scrapingJobId,
       job_external_id: job.externalId ?? null,
@@ -435,12 +574,34 @@ function buildSearchParams(input: Record<string, unknown>): RunLinkedInSearchInp
     locations: toArray(input.locations ?? input.location ?? []),
     postedLimit:
       (input.postedLimit as RunLinkedInSearchInput['postedLimit']) ?? 'Past Week',
-    maxItems: typeof input.maxItems === 'number' ? input.maxItems : Number(input.maxItems) || 50,
+    maxItems: typeof input.maxItems === 'number' ? input.maxItems : Number(input.maxItems) || 500,
     sort: (input.sort as RunLinkedInSearchInput['sort']) ?? 'date',
     workplaceType: toArray(input.workplaceType ?? []),
     employmentType: toArray(input.employmentType ?? []),
     experienceLevel: toArray(input.experienceLevel ?? []),
   };
+}
+
+/**
+ * Single entry point to run a job search for any supported actor.
+ * Each source (LinkedIn Jobs, Indeed, Glassdoor) keeps its own form and UI; this dispatches by actorId.
+ * Currently only LinkedIn Jobs (HarvestAPI) is implemented.
+ */
+export async function runJobSearch(options: {
+  actorId: string;
+  input?: Record<string, unknown>;
+  savedSearchId?: string;
+}): Promise<RunLinkedInSearchResult> {
+  const { actorId, input, savedSearchId } = options;
+  if (actorId === APIFY_ACTORS.LINKEDIN_JOBS) {
+    return runLinkedInJobSearch({
+      input: (input ?? {}) as RunLinkedInSearchInput | Record<string, unknown>,
+      savedSearchId,
+    });
+  }
+  throw new Error(
+    `This source is not connected yet. Currently only LinkedIn Jobs is supported. (Received: ${actorId})`
+  );
 }
 
 /**
@@ -454,13 +615,6 @@ export async function runLinkedInJobSearch(options: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('You must be logged in to run a search.');
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('team_id')
-    .eq('id', user.id)
-    .single();
-
-  const teamId = profile?.team_id ?? null;
   const rawInput: Record<string, unknown> = options.savedSearchId
     ? await loadSavedSearchInput(options.savedSearchId)
     : (options.input as Record<string, unknown>);
@@ -482,7 +636,6 @@ export async function runLinkedInJobSearch(options: {
     .from('scraping_jobs')
     .insert({
       user_id: user.id,
-      team_id: teamId,
       actor_id: APIFY_ACTORS.LINKEDIN_JOBS,
       run_id: null,
       saved_search_id: options.savedSearchId ?? null,
@@ -508,7 +661,7 @@ export async function runLinkedInJobSearch(options: {
   try {
     const client = await createApifyClient();
     const jobs = await client.searchLinkedInJobs(params);
-    const result = await saveJobsAsLeads(jobs, scrapingJobId, user.id, teamId);
+    const result = await saveJobsAsLeads(jobs, scrapingJobId, user.id);
     return {
       scrapingJobId,
       imported: result.imported,

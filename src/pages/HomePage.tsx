@@ -1,6 +1,6 @@
 // =====================================================
-// LEADFLOW - Home Page (Source Selection)
-// Layout y marca: wearevloom.com — limpio, profesional.
+// Leadflow Vloom - Home Page (Source Selection)
+// Layout and brand: wearevloom.com — clean, professional.
 // =====================================================
 import React from 'react';
 import {
@@ -135,7 +135,7 @@ export function HomePage({ onSelectSource, embedded }: HomePageProps) {
         <header className="border-b border-vloom-border bg-vloom-surface sticky top-0 z-10">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-14">
-              <span className="text-lg font-semibold text-vloom-text">Vloom Lead Generator</span>
+              <span className="text-lg font-semibold text-vloom-text">Leadflow Vloom</span>
               <div className="flex items-center gap-4">
                 <button className="text-sm text-vloom-muted hover:text-vloom-text">
                   My Leads
@@ -152,11 +152,11 @@ export function HomePage({ onSelectSource, embedded }: HomePageProps) {
       <main className={`max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 ${embedded ? 'py-6' : 'py-12'}`}>
         <div className={embedded ? 'mb-6' : 'mb-10'}>
           <h1 className={`font-semibold text-vloom-text ${embedded ? 'text-lg mb-0' : 'text-3xl font-bold mb-2'}`}>
-            Hola, ¿dónde quieres buscar leads?
+            Where do you want to search for leads?
           </h1>
           {!embedded && (
             <p className="text-vloom-muted">
-              Selecciona una fuente para comenzar. Extraemos los datos, enriquecemos contactos y te ayudamos a contactarlos con IA.
+              Choose a source to get started. We extract the data, enrich contacts and help you reach out with AI.
             </p>
           )}
         </div>

@@ -1,5 +1,5 @@
 // =====================================================
-// LEADFLOW - EmailComposer Component
+// Leadflow Vloom - EmailComposer Component
 // =====================================================
 import React, { useState } from 'react';
 import {

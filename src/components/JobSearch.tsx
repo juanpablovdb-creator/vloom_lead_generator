@@ -1,5 +1,5 @@
 // =====================================================
-// LEADFLOW - JobSearch Component
+// Leadflow Vloom - JobSearch Component
 // =====================================================
 import React, { useState } from 'react';
 import {

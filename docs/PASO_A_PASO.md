@@ -6,6 +6,18 @@ Guía de los comandos y acciones que **tú** debes ejecutar después de cada ses
 
 ---
 
+## 0. Si ves "team_id" o "schema cache" al buscar
+
+Tras aplicar migraciones que quitan columnas (p. ej. 008_remove_teams), PostgREST puede seguir usando un esquema en caché antiguo. En **Supabase Dashboard → SQL Editor** ejecuta:
+
+```sql
+NOTIFY pgrst, 'reload schema';
+```
+
+Luego vuelve a intentar la búsqueda.
+
+---
+
 ## 1. Probar que todo funciona
 
 ```bash

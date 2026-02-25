@@ -1,5 +1,5 @@
 -- =====================================================
--- LEADFLOW - Leads = solo lo que el usuario marque como lead
+-- Leadflow Vloom - Leads = solo lo que el usuario marque como lead
 -- =====================================================
 -- Resultados de búsqueda se guardan sin marcar; el usuario hace check
 -- para "marcar como lead". Lista Leads y CRM muestran solo is_marked_as_lead = true.

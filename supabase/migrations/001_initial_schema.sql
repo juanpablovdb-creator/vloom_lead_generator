@@ -1,5 +1,5 @@
 -- =====================================================
--- LEADFLOW - Schema de Base de Datos para Supabase
+-- Leadflow Vloom - Schema de Base de Datos para Supabase
 -- =====================================================
 -- Este schema va 100% en Supabase, nada en Lovable Cloud
 
@@ -7,9 +7,9 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- =====================================================
--- TABLA: teams (equipos de trabajo)
+-- TABLA: teams (equipos de trabajo) — IF NOT EXISTS para no fallar si ya existe; 008_remove_teams la elimina
 -- =====================================================
-CREATE TABLE teams (
+CREATE TABLE IF NOT EXISTS teams (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -19,7 +19,7 @@ CREATE TABLE teams (
 -- =====================================================
 -- TABLA: profiles (perfiles de usuario extendidos)
 -- =====================================================
-CREATE TABLE profiles (
+CREATE TABLE IF NOT EXISTS profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email VARCHAR(255) NOT NULL,
     full_name VARCHAR(255),
@@ -33,7 +33,7 @@ CREATE TABLE profiles (
 -- =====================================================
 -- TABLA: leads (tabla principal de prospectos)
 -- =====================================================
-CREATE TABLE leads (
+CREATE TABLE IF NOT EXISTS leads (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     
     -- Ownership
@@ -106,7 +106,7 @@ CREATE TABLE leads (
 -- =====================================================
 -- TABLA: scoring_presets (configuraciones de scoring)
 -- =====================================================
-CREATE TABLE scoring_presets (
+CREATE TABLE IF NOT EXISTS scoring_presets (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     team_id UUID REFERENCES teams(id) ON DELETE SET NULL,
@@ -129,7 +129,7 @@ CREATE TABLE scoring_presets (
 -- =====================================================
 -- TABLA: email_templates (plantillas de email)
 -- =====================================================
-CREATE TABLE email_templates (
+CREATE TABLE IF NOT EXISTS email_templates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     team_id UUID REFERENCES teams(id) ON DELETE SET NULL,
@@ -150,7 +150,7 @@ CREATE TABLE email_templates (
 -- =====================================================
 -- TABLA: emails_sent (historial de emails enviados)
 -- =====================================================
-CREATE TABLE emails_sent (
+CREATE TABLE IF NOT EXISTS emails_sent (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -189,7 +189,7 @@ CREATE TABLE emails_sent (
 -- =====================================================
 -- TABLA: scraping_jobs (jobs de Apify)
 -- =====================================================
-CREATE TABLE scraping_jobs (
+CREATE TABLE IF NOT EXISTS scraping_jobs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     team_id UUID REFERENCES teams(id) ON DELETE SET NULL,
@@ -225,7 +225,7 @@ CREATE TABLE scraping_jobs (
 -- =====================================================
 -- TABLA: api_keys (keys de servicios externos)
 -- =====================================================
-CREATE TABLE api_keys (
+CREATE TABLE IF NOT EXISTS api_keys (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     
@@ -250,22 +250,22 @@ CREATE TABLE api_keys (
 );
 
 -- =====================================================
--- INDEXES para performance
+-- INDEXES para performance (IF NOT EXISTS para re-ejecución idempotente)
 -- =====================================================
-CREATE INDEX idx_leads_user_id ON leads(user_id);
-CREATE INDEX idx_leads_team_id ON leads(team_id);
-CREATE INDEX idx_leads_status ON leads(status);
-CREATE INDEX idx_leads_score ON leads(score DESC);
-CREATE INDEX idx_leads_created_at ON leads(created_at DESC);
-CREATE INDEX idx_leads_company_name ON leads(company_name);
-CREATE INDEX idx_leads_is_shared ON leads(is_shared) WHERE is_shared = TRUE;
+CREATE INDEX IF NOT EXISTS idx_leads_user_id ON leads(user_id);
+CREATE INDEX IF NOT EXISTS idx_leads_team_id ON leads(team_id);
+CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(score DESC);
+CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leads_company_name ON leads(company_name);
+CREATE INDEX IF NOT EXISTS idx_leads_is_shared ON leads(is_shared) WHERE is_shared = TRUE;
 
-CREATE INDEX idx_emails_sent_lead_id ON emails_sent(lead_id);
-CREATE INDEX idx_emails_sent_user_id ON emails_sent(user_id);
-CREATE INDEX idx_emails_sent_status ON emails_sent(status);
+CREATE INDEX IF NOT EXISTS idx_emails_sent_lead_id ON emails_sent(lead_id);
+CREATE INDEX IF NOT EXISTS idx_emails_sent_user_id ON emails_sent(user_id);
+CREATE INDEX IF NOT EXISTS idx_emails_sent_status ON emails_sent(status);
 
-CREATE INDEX idx_scraping_jobs_user_id ON scraping_jobs(user_id);
-CREATE INDEX idx_scraping_jobs_status ON scraping_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_scraping_jobs_user_id ON scraping_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_scraping_jobs_status ON scraping_jobs(status);
 
 -- =====================================================
 -- ROW LEVEL SECURITY (RLS)
@@ -279,41 +279,51 @@ ALTER TABLE emails_sent ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scraping_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
 
--- Profiles: usuarios ven su propio perfil y los de su equipo
+-- Profiles: usuarios ven su propio perfil y los de su equipo (DROP IF EXISTS para re-ejecución idempotente)
+DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
 CREATE POLICY "Users can view own profile" ON profiles
     FOR SELECT USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
 CREATE POLICY "Users can update own profile" ON profiles
     FOR UPDATE USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can view team members" ON profiles;
 CREATE POLICY "Users can view team members" ON profiles
     FOR SELECT USING (
         team_id IN (SELECT team_id FROM profiles WHERE id = auth.uid())
     );
 
 -- Leads: usuarios ven sus leads y los compartidos del equipo
+DROP POLICY IF EXISTS "Users can view own leads" ON leads;
 CREATE POLICY "Users can view own leads" ON leads
     FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can view shared team leads" ON leads;
 CREATE POLICY "Users can view shared team leads" ON leads
     FOR SELECT USING (
         is_shared = TRUE AND 
         team_id IN (SELECT team_id FROM profiles WHERE id = auth.uid())
     );
 
+DROP POLICY IF EXISTS "Users can insert own leads" ON leads;
 CREATE POLICY "Users can insert own leads" ON leads
     FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own leads" ON leads;
 CREATE POLICY "Users can update own leads" ON leads
     FOR UPDATE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own leads" ON leads;
 CREATE POLICY "Users can delete own leads" ON leads
     FOR DELETE USING (auth.uid() = user_id);
 
 -- Email Templates: propios y compartidos del equipo
+DROP POLICY IF EXISTS "Users can manage own templates" ON email_templates;
 CREATE POLICY "Users can manage own templates" ON email_templates
     FOR ALL USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can view shared team templates" ON email_templates;
 CREATE POLICY "Users can view shared team templates" ON email_templates
     FOR SELECT USING (
         is_shared = TRUE AND 
@@ -321,14 +331,17 @@ CREATE POLICY "Users can view shared team templates" ON email_templates
     );
 
 -- Emails Sent: solo el usuario que envió
+DROP POLICY IF EXISTS "Users can manage own sent emails" ON emails_sent;
 CREATE POLICY "Users can manage own sent emails" ON emails_sent
     FOR ALL USING (auth.uid() = user_id);
 
 -- Scraping Jobs: propios
+DROP POLICY IF EXISTS "Users can manage own scraping jobs" ON scraping_jobs;
 CREATE POLICY "Users can manage own scraping jobs" ON scraping_jobs
     FOR ALL USING (auth.uid() = user_id);
 
 -- API Keys: solo admins del equipo
+DROP POLICY IF EXISTS "Team admins can manage api keys" ON api_keys;
 CREATE POLICY "Team admins can manage api keys" ON api_keys
     FOR ALL USING (
         team_id IN (
@@ -381,6 +394,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_update_lead_score ON leads;
 CREATE TRIGGER trigger_update_lead_score
     BEFORE INSERT OR UPDATE ON leads
     FOR EACH ROW
@@ -400,6 +414,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW
@@ -409,15 +424,17 @@ CREATE TRIGGER on_auth_user_created
 -- DATOS INICIALES
 -- =====================================================
 
--- Template de email por defecto
+-- Template de email por defecto (solo si no existe y hay al menos un usuario, para no violar FK user_id)
 INSERT INTO email_templates (id, user_id, team_id, name, subject, body_template, ai_prompt, is_shared)
-VALUES (
-    '00000000-0000-0000-0000-000000000001',
-    '00000000-0000-0000-0000-000000000000', -- Se actualizará con el primer usuario
+SELECT
+    '00000000-0000-0000-0000-000000000001'::uuid,
+    u.id,
     NULL,
     'Outreach Inicial - Video Editor',
     'Colaboración en edición de video para {{company_name}}',
     E'Hola {{contact_name}},\n\nVi que {{company_name}} está buscando un {{job_title}} y me pareció muy interesante la oportunidad.\n\n[PERSONALIZACIÓN_AI]\n\n¿Tendrías 15 minutos esta semana para una llamada rápida?\n\nSaludos,\n[TU_NOMBRE]',
     'Genera un párrafo personalizado mencionando algo específico sobre la empresa o el rol que demuestre investigación genuina. Mantén un tono profesional pero cercano.',
     FALSE
-);
+FROM auth.users u
+WHERE NOT EXISTS (SELECT 1 FROM email_templates WHERE id = '00000000-0000-0000-0000-000000000001')
+LIMIT 1;

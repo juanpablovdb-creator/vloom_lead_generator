@@ -1,5 +1,5 @@
 // =====================================================
-// Vloom Lead Generator - Main app content (sidebar + section views)
+// Leadflow Vloom - Main app content (sidebar + section views)
 // =====================================================
 import { useState, useCallback } from 'react';
 import { AppLayout } from '@/components/Layout';
@@ -7,27 +7,37 @@ import type { SectionId, DiscoverySubId } from '@/components/Layout';
 import { HomePage, LeadSource } from '@/pages/HomePage';
 import { SearchConfigPage } from '@/pages/SearchConfigPage';
 import { CRMView } from '@/components/CRM';
-import { runLinkedInJobSearch } from '@/lib/apify';
+import { runJobSearchViaEdge } from '@/lib/apify';
 import { SavedSearchesView } from '@/components/SavedSearchesView';
+import { useSavedSearches } from '@/hooks/useSavedSearches';
 
 type View = 'app' | 'search-config';
 
 type LastSearchResult =
-  | { ok: true; imported: number; skipped: number; totalFromApify: number }
+  | { ok: true; scrapingJobId: string; imported: number; skipped: number; totalFromApify: number }
   | { ok: false; error: string }
   | null;
 
-export function AppContent() {
+export interface AppContentProps {
+  userEmail?: string | null;
+  onSignOut?: () => void;
+}
+
+export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
   const [section, setSection] = useState<SectionId>('discovery');
   const [discoverySub, setDiscoverySub] = useState<DiscoverySubId>('new-search');
   const [view, setView] = useState<View>('app');
   const [selectedSource, setSelectedSource] = useState<LeadSource | null>(null);
   const [lastSearchResult, setLastSearchResult] = useState<LastSearchResult>(null);
+  const { createSavedSearch } = useSavedSearches();
 
   const handleNavigate = useCallback((s: SectionId, sub?: DiscoverySubId) => {
     setSection(s);
-    if (s === 'discovery' && sub) setDiscoverySub(sub);
-    else if (s === 'discovery') setDiscoverySub(sub ?? 'new-search');
+    if (s === 'discovery') {
+      setDiscoverySub(sub ?? 'new-search');
+      // Show section content (e.g. Saved searches) instead of staying on Search config
+      setView('app');
+    }
   }, []);
 
   const handleSelectSource = useCallback((source: LeadSource) => {
@@ -37,39 +47,39 @@ export function AppContent() {
 
   const handleBackFromSearchConfig = useCallback(() => {
     setSelectedSource(null);
+    setLastSearchResult(null);
     setView('app');
   }, []);
 
   const handleSearch = useCallback(async (source: LeadSource, params: Record<string, unknown>) => {
-    if (source.apifyActorId !== 'harvestapi/linkedin-job-search') {
-      setLastSearchResult({ ok: false, error: 'Only LinkedIn Jobs (HarvestAPI) is connected for now.' });
-      setView('app');
-      setSection('discovery');
-      setDiscoverySub('leads-lists');
-      setSelectedSource(null);
-      return;
-    }
     try {
-      const result = await runLinkedInJobSearch({ input: params });
+      const result = await runJobSearchViaEdge({
+        actorId: source.apifyActorId,
+        input: params,
+      });
       setLastSearchResult({
         ok: true,
+        scrapingJobId: result.scrapingJobId,
         imported: result.imported,
         skipped: result.skipped,
         totalFromApify: result.totalFromApify,
       });
-      setView('app');
-      setSection('discovery');
-      setDiscoverySub('leads-lists');
-      setSelectedSource(null);
     } catch (err) {
-      setLastSearchResult({
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      setView('app');
-      setSection('discovery');
-      setDiscoverySub('leads-lists');
-      setSelectedSource(null);
+      const msg =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null && 'message' in err
+            ? String((err as { message: unknown }).message)
+            : String(err);
+      const errStr = typeof msg === 'string' ? msg : String(err);
+      if (/team_id|schema cache/i.test(errStr)) {
+        setLastSearchResult({
+          ok: false,
+          error: 'Database schema cache is stale after removing teams. In Supabase Dashboard → SQL Editor run: NOTIFY pgrst, \'reload schema\'; then try again.',
+        });
+      } else {
+        setLastSearchResult({ ok: false, error: errStr });
+      }
     }
   }, []);
 
@@ -79,12 +89,17 @@ export function AppContent() {
       activeSection={section}
       activeDiscoverySub={discoverySub}
       onNavigate={handleNavigate}
+      userEmail={userEmail}
+      onSignOut={onSignOut}
     >
       {view === 'search-config' && selectedSource ? (
         <SearchConfigPage
           source={selectedSource}
           onBack={handleBackFromSearchConfig}
           onSearch={handleSearch}
+          lastSearchResult={lastSearchResult}
+          onDismissResult={() => setLastSearchResult(null)}
+          onSaveSearch={createSavedSearch}
         />
       ) : (
         <>
@@ -97,6 +112,7 @@ export function AppContent() {
           onRunComplete={(result) => {
             setLastSearchResult({
               ok: true,
+              scrapingJobId: result.scrapingJobId,
               imported: result.imported,
               skipped: result.skipped,
               totalFromApify: result.totalFromApify,

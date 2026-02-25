@@ -1,5 +1,5 @@
 // =====================================================
-// LEADFLOW - useSavedSearches
+// Leadflow Vloom - useSavedSearches
 // =====================================================
 import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -46,21 +46,14 @@ export function useSavedSearches() {
       if (!supabase) throw new Error('Supabase not configured');
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('You must be logged in.');
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('team_id')
-        .eq('id', user.id)
-        .single();
-      const team_id = profile?.team_id;
-      if (!team_id) throw new Error('No team found. Join or create a team first.');
       const { data, error: err } = await supabase
         .from('saved_searches')
         .insert({
-          team_id,
           user_id: user.id,
           name: params.name,
           actor_id: params.actor_id,
           input: params.input,
+          autorun: false,
         })
         .select('id')
         .single();
@@ -80,5 +73,22 @@ export function useSavedSearches() {
     [fetchSearches]
   );
 
-  return { savedSearches, isLoading, error, refetch: fetchSearches, createSavedSearch, deleteSavedSearch };
+  const updateSavedSearch = useCallback(
+    async (id: string, updates: { autorun?: boolean }) => {
+      if (!supabase) return;
+      await supabase.from('saved_searches').update(updates).eq('id', id);
+      await fetchSearches();
+    },
+    [fetchSearches]
+  );
+
+  return {
+    savedSearches,
+    isLoading,
+    error,
+    refetch: fetchSearches,
+    createSavedSearch,
+    deleteSavedSearch,
+    updateSavedSearch,
+  };
 }

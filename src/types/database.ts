@@ -1,5 +1,5 @@
 // =====================================================
-// LEADFLOW - TypeScript Types
+// Leadflow Vloom - TypeScript Types
 // =====================================================
 // Estos types hacen match exacto con el schema de Supabase
 
@@ -45,19 +45,11 @@ export type ApiService =
 // Database Row Types
 // =====================================================
 
-export interface Team {
-  id: string;
-  name: string;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface Profile {
   id: string;
   email: string;
   full_name: string | null;
   avatar_url: string | null;
-  team_id: string | null;
   role: UserRole;
   created_at: string;
   updated_at: string;
@@ -66,7 +58,6 @@ export interface Profile {
 export interface Lead {
   id: string;
   user_id: string;
-  team_id: string | null;
   is_shared: boolean;
   
   // Job Post Info
@@ -131,7 +122,6 @@ export interface ScoreWeights {
 export interface ScoringPreset {
   id: string;
   user_id: string;
-  team_id: string | null;
   name: string;
   description: string | null;
   weights: ScoreWeights;
@@ -145,7 +135,6 @@ export interface ScoringPreset {
 export interface EmailTemplate {
   id: string;
   user_id: string;
-  team_id: string | null;
   is_shared: boolean;
   name: string;
   subject: string;
@@ -176,7 +165,6 @@ export interface EmailSent {
 export interface ScrapingJob {
   id: string;
   user_id: string;
-  team_id: string | null;
   actor_id: string;
   run_id: string | null;
   saved_search_id: string | null;
@@ -194,18 +182,19 @@ export interface ScrapingJob {
 
 export interface SavedSearch {
   id: string;
-  team_id: string;
   user_id: string;
   name: string;
   actor_id: string;
   input: Record<string, unknown>;
+  /** When true, search can be re-run automatically (e.g. daily) for new results only. */
+  autorun: boolean;
   created_at: string;
   updated_at: string;
 }
 
 export interface ApiKey {
   id: string;
-  team_id: string;
+  user_id: string;
   service: ApiService;
   api_key_encrypted: string;
   is_active: boolean;
@@ -282,6 +271,8 @@ export interface LeadFilters {
   show_shared?: boolean;
   /** Filter to leads from this saved search (via scraping_job.saved_search_id). */
   saved_search_id?: string;
+  /** Filter to leads from this single scraping run (e.g. after New Search). */
+  scraping_job_id?: string;
   /** When true, show only rows where user marked as lead (CRM / Leads list). */
   marked_as_lead_only?: boolean;
   /** Leads list and CRM: view by company or by person. */
@@ -338,11 +329,6 @@ export interface EmailGenerationResponse {
 export interface Database {
   public: {
     Tables: {
-      teams: {
-        Row: Team;
-        Insert: Omit<Team, 'id' | 'created_at' | 'updated_at'>;
-        Update: Partial<Omit<Team, 'id'>>;
-      };
       profiles: {
         Row: Profile;
         Insert: Omit<Profile, 'created_at' | 'updated_at'>;
@@ -376,12 +362,12 @@ export interface Database {
       saved_searches: {
         Row: SavedSearch;
         Insert: Omit<SavedSearch, 'id' | 'created_at' | 'updated_at'>;
-        Update: Partial<Omit<SavedSearch, 'id' | 'user_id' | 'team_id'>>;
+        Update: Partial<Omit<SavedSearch, 'id' | 'user_id'>>;
       };
       api_keys: {
         Row: ApiKey;
         Insert: Omit<ApiKey, 'id' | 'created_at' | 'updated_at'>;
-        Update: Partial<Omit<ApiKey, 'id' | 'team_id'>>;
+        Update: Partial<Omit<ApiKey, 'id' | 'user_id'>>;
       };
     };
   };

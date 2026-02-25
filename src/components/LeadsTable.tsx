@@ -1,5 +1,5 @@
 // =====================================================
-// LEADFLOW - LeadsTable Component (Clay-style)
+// Leadflow Vloom - LeadsTable Component (Clay-style)
 // =====================================================
 import React, { useState, useMemo } from 'react';
 import {
@@ -42,7 +42,7 @@ interface LeadsTableProps {
   groupSizeByLeadId?: Record<string, number>;
 }
 
-// Columnas por defecto
+// Default columns
 const DEFAULT_COLUMNS: TableColumn[] = [
   { key: 'is_marked_as_lead', label: 'Lead', visible: true, sortable: false },
   { key: 'company_name', label: 'Company', visible: true, sortable: true },
@@ -54,7 +54,7 @@ const DEFAULT_COLUMNS: TableColumn[] = [
   { key: 'score', label: 'Score', visible: true, sortable: true },
   { key: 'status', label: 'Status', visible: true, sortable: true },
   { key: 'job_source', label: 'Source', visible: false, sortable: true },
-  { key: 'created_at', label: 'Added', visible: false, sortable: true },
+  { key: 'created_at', label: 'Imported', visible: true, sortable: true },
 ];
 
 // Status badges (CRM pipeline)
@@ -159,7 +159,7 @@ function ActionMenu({
               className="w-full px-3 py-2 text-left text-sm hover:bg-vloom-border/30 text-vloom-text flex items-center gap-2"
             >
               <Share2 className="w-4 h-4 text-indigo-500" />
-              {lead.is_shared ? 'Make Private' : 'Share with Team'}
+              {lead.is_shared ? 'Make Private' : 'Share'}
             </button>
             <hr className="my-1" />
             <div className="px-3 py-1 text-xs text-vloom-muted uppercase">Change Status</div>
@@ -346,12 +346,23 @@ export function LeadsTable({
           </div>
         );
 
-      case 'created_at':
+      case 'created_at': {
+        const date = value ? new Date(value as string) : null;
+        const isNew =
+          date && (Date.now() - date.getTime() < 48 * 60 * 60 * 1000);
         return (
-          <span className="text-sm text-vloom-muted">
-            {new Date(value as string).toLocaleDateString()}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-vloom-muted">
+              {date ? date.toLocaleDateString(undefined, { dateStyle: 'short' }) : '—'}
+            </span>
+            {isNew && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-vloom-accent/20 text-vloom-accent">
+                New
+              </span>
+            )}
+          </div>
         );
+      }
 
       default:
         return (

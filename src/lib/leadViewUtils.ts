@@ -1,5 +1,5 @@
 // =====================================================
-// LEADFLOW - Lead view helpers (by company vs by person)
+// Leadflow Vloom - Lead view helpers (by company vs by person)
 // =====================================================
 import type { Lead } from '@/types/database';
 import type { LeadViewBy } from '@/types/database';

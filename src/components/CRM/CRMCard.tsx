@@ -1,5 +1,5 @@
 // =====================================================
-// Vloom Lead Generator - CRM card (Kanban)
+// Leadflow Vloom - CRM card (Kanban)
 // =====================================================
 import { Check } from 'lucide-react';
 import type { Lead } from '@/types/database';

@@ -1,12 +1,11 @@
 // =====================================================
-// LEADFLOW - Search Configuration Page
+// Leadflow Vloom - Search Configuration Page
 // =====================================================
-// Los parámetros de cada Actor se definen aquí y deben coincidir
-// con los inputs del Actor de Apify correspondiente.
-// Documentación: https://apify.com/store
+// Each Actor's parameters are defined here and must match the
+// inputs of the corresponding Apify Actor. Docs: https://apify.com/store
 // =====================================================
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   ArrowLeft,
   Search,
@@ -18,19 +17,24 @@ import {
   Hash,
   Filter,
   Briefcase,
+  Save,
+  X,
+  ChevronDown,
 } from 'lucide-react';
 import type { LeadSource } from './HomePage';
+import { useLeads } from '@/hooks/useLeads';
+import { LeadsTable } from '@/components/LeadsTable';
 
 // =====================================================
 // APIFY ACTOR INPUT SCHEMAS
-// Estos parámetros deben coincidir con los inputs de cada Actor
-// Referencia: https://apify.com/{actor-id}/input-schema
+// These parameters must match each Actor's inputs.
+// Reference: https://apify.com/{actor-id}/input-schema
 // =====================================================
 
 interface ActorInputField {
   key: string;
   label: string;
-  type: 'text' | 'select' | 'number' | 'location';
+  type: 'text' | 'select' | 'number' | 'location' | 'locations';
   placeholder?: string;
   required?: boolean;
   options?: { value: string; label: string }[];
@@ -39,7 +43,143 @@ interface ActorInputField {
   icon?: React.ReactNode;
 }
 
-// Configuración de inputs por Actor de Apify
+// Predefined locations (USA, Canada, Europe) to avoid typos and save credits when testing
+const LOCATION_OPTIONS = [
+  'United States',
+  'Canada',
+  'Remote',
+  'United Kingdom',
+  'Germany',
+  'France',
+  'Spain',
+  'Italy',
+  'Netherlands',
+  'Belgium',
+  'Ireland',
+  'Portugal',
+  'Switzerland',
+  'Austria',
+  'Sweden',
+  'Norway',
+  'Denmark',
+  'Finland',
+  'Poland',
+  'Czech Republic',
+  'Romania',
+  'Greece',
+  'Hungary',
+  'Ukraine',
+  'Croatia',
+  'Bulgaria',
+  'Slovakia',
+  'Slovenia',
+  'Lithuania',
+  'Latvia',
+  'Estonia',
+  'Luxembourg',
+  'Malta',
+  'Cyprus',
+  'Iceland',
+];
+
+// Multi-select dropdown for locations (styled, with chips)
+function LocationsMultiSelect({
+  options,
+  value,
+  onChange,
+  placeholder,
+  className,
+}: {
+  options: { value: string; label: string }[];
+  value: string[];
+  onChange: (selected: string[]) => void;
+  placeholder: string;
+  className: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) {
+      document.addEventListener('mousedown', onOutside);
+      return () => document.removeEventListener('mousedown', onOutside);
+    }
+  }, [open]);
+
+  const toggle = (optValue: string) => {
+    if (value.includes(optValue)) {
+      onChange(value.filter((v) => v !== optValue));
+    } else {
+      onChange([...value, optValue]);
+    }
+  };
+
+  const remove = (optValue: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChange(value.filter((v) => v !== optValue));
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`${className} flex items-center justify-between gap-2 text-left min-h-[52px] cursor-pointer`}
+      >
+        <span className="flex-1 flex flex-wrap gap-1.5">
+          {value.length === 0 ? (
+            <span className="text-vloom-muted">{placeholder}</span>
+          ) : (
+            value.map((v) => (
+              <span
+                key={v}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-vloom-accent/15 text-vloom-accent text-sm"
+              >
+                {v}
+                <button
+                  type="button"
+                  onClick={(e) => remove(v, e)}
+                  className="hover:bg-vloom-accent/25 rounded p-0.5"
+                  aria-label={`Remove ${v}`}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </span>
+            ))
+          )}
+        </span>
+        <ChevronDown
+          className={`w-5 h-5 text-vloom-muted flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full rounded-xl border border-vloom-border bg-vloom-surface shadow-lg max-h-64 overflow-y-auto">
+          <div className="p-2">
+            {options.map((opt) => (
+              <label
+                key={opt.value}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-vloom-border/30 cursor-pointer text-sm text-vloom-text"
+              >
+                <input
+                  type="checkbox"
+                  checked={value.includes(opt.value)}
+                  onChange={() => toggle(opt.value)}
+                  className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent/50"
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Apify Actor input configuration
 const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
   // HarvestAPI LinkedIn Job Search - harvestapi/linkedin-job-search
   // Docs: https://apify.com/harvestapi/linkedin-job-search
@@ -56,10 +196,11 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
     {
       key: 'locations',
       label: 'Locations',
-      type: 'text',
-      placeholder: 'United States, Remote, New York...',
+      type: 'locations',
       required: false,
-      helpText: 'Optional. Separate multiple with commas. Use full names (e.g. United Kingdom).',
+      options: LOCATION_OPTIONS.map((loc) => ({ value: loc, label: loc })),
+      defaultValue: '',
+      helpText: 'Optional. Select one or more (Ctrl/Cmd+click). USA, Canada, Europe. No typing needed.',
       icon: <MapPin className="w-4 h-4" />,
     },
     {
@@ -67,21 +208,22 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       label: 'Date posted',
       type: 'select',
       options: [
+        { value: 'Past 1 hour', label: 'Past 1 hour' },
         { value: 'Past 24 hours', label: 'Past 24 hours' },
         { value: 'Past Week', label: 'Past week' },
         { value: 'Past Month', label: 'Past month' },
       ],
-      defaultValue: 'Past 24 hours',
-      helpText: 'Only jobs posted in this period (ideal for daily run).',
+      defaultValue: 'Past 1 hour',
+      helpText: 'Only jobs posted in this period. Use "Past 1 hour" for quick tests to save credits.',
       icon: <Clock className="w-4 h-4" />,
     },
     {
       key: 'maxItems',
       label: 'Max results',
       type: 'number',
-      placeholder: '24',
-      defaultValue: 24,
-      helpText: 'Maximum number of jobs to fetch (e.g. 24 for daily run).',
+      placeholder: '500',
+      defaultValue: 500,
+      helpText: 'Maximum number of jobs to fetch. Use 500 to scrape all jobs for the selected period (e.g. past 24 hours).',
       icon: <Hash className="w-4 h-4" />,
     },
     {
@@ -225,16 +367,128 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
 // COMPONENT
 // =====================================================
 
+type LastSearchResult =
+  | { ok: true; scrapingJobId: string; imported: number; skipped: number; totalFromApify: number }
+  | { ok: false; error: string }
+  | null;
+
+/** Table of leads for a single run (used after Start Search). */
+function SearchResultsTable({ scrapingJobId }: { scrapingJobId: string }) {
+  const {
+    leads,
+    totalCount,
+    isLoading,
+    error,
+    sort,
+    setSort,
+    pagination,
+    setPage,
+    refreshLeads,
+    updateLead,
+    updateLeadStatus,
+    selectedIds,
+    toggleSelection,
+    selectAll,
+    clearSelection,
+    isAllSelected,
+  } = useLeads({
+    initialFilters: { scraping_job_id: scrapingJobId },
+    pageSize: 25,
+  });
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-vloom-border bg-vloom-surface p-4 text-sm text-red-600">{error}</div>
+    );
+  }
+
+  const noop = () => {};
+  return (
+    <div className="rounded-xl border border-vloom-border bg-vloom-surface overflow-hidden">
+      <div className="p-3 border-b border-vloom-border flex items-center justify-between">
+        <h3 className="text-sm font-medium text-vloom-text">Results ({totalCount})</h3>
+        <button
+          type="button"
+          onClick={() => refreshLeads()}
+          className="text-xs text-vloom-muted hover:text-vloom-text"
+        >
+          Refresh
+        </button>
+      </div>
+      <LeadsTable
+        leads={leads}
+        isLoading={isLoading}
+        sort={sort}
+        onSortChange={setSort}
+        selectedIds={selectedIds}
+        onToggleSelection={toggleSelection}
+        onSelectAll={selectAll}
+        onClearSelection={clearSelection}
+        isAllSelected={isAllSelected}
+        onGenerateEmail={noop}
+        onSendEmail={noop}
+        onEnrich={noop}
+        onDelete={noop}
+        onStatusChange={(lead, status) => updateLeadStatus(lead.id, status)}
+        onToggleShare={noop}
+        onViewDetails={noop}
+        onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
+      />
+      {totalCount > pagination.pageSize && (
+        <div className="p-3 border-t border-vloom-border flex items-center justify-between text-sm text-vloom-muted">
+          <span>
+            Showing {(pagination.page - 1) * pagination.pageSize + 1} to{' '}
+            {Math.min(pagination.page * pagination.pageSize, totalCount)} of {totalCount}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage(pagination.page - 1)}
+              disabled={pagination.page === 1}
+              className="px-2 py-1 rounded hover:bg-vloom-border disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="px-2 py-1 bg-vloom-border rounded">{pagination.page}</span>
+            <button
+              type="button"
+              onClick={() => setPage(pagination.page + 1)}
+              disabled={pagination.page * pagination.pageSize >= totalCount}
+              className="px-2 py-1 rounded hover:bg-vloom-border disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface SearchConfigPageProps {
   source: LeadSource;
   onBack: () => void;
   onSearch: (source: LeadSource, params: Record<string, unknown>) => Promise<void>;
+  lastSearchResult?: LastSearchResult | null;
+  onDismissResult?: () => void;
+  onSaveSearch?: (params: { name: string; actor_id: string; input: Record<string, unknown> }) => Promise<unknown>;
 }
 
-export function SearchConfigPage({ source, onBack, onSearch }: SearchConfigPageProps) {
+export function SearchConfigPage({
+  source,
+  onBack,
+  onSearch,
+  lastSearchResult = null,
+  onDismissResult,
+  onSaveSearch,
+}: SearchConfigPageProps) {
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [isSearching, setIsSearching] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saveName, setSaveName] = useState('');
+  const [savingSearch, setSavingSearch] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedSearchId, setSavedSearchId] = useState<string | null>(null);
 
   const inputSchema = useMemo(
     () => ACTOR_INPUT_SCHEMAS[source.apifyActorId] || [],
@@ -326,6 +580,14 @@ export function SearchConfigPage({ source, onBack, onSearch }: SearchConfigPageP
                 </option>
               ))}
             </select>
+          ) : field.type === 'locations' ? (
+            <LocationsMultiSelect
+              options={field.options ?? []}
+              value={(value as string) ? (value as string).split(',').map((s: string) => s.trim()).filter(Boolean) : []}
+              onChange={(selected) => handleChange(field.key, selected.join(', '))}
+              placeholder="Select locations..."
+              className={baseInputClass}
+            />
           ) : field.type === 'number' ? (
             <input
               type="number"
@@ -438,18 +700,111 @@ export function SearchConfigPage({ source, onBack, onSearch }: SearchConfigPageP
           </button>
         </form>
 
-        <div className="mt-8 p-4 bg-vloom-border/30 rounded-xl">
-          <p className="text-xs text-vloom-muted font-mono">
-            Inputs map to the Apify Actor schema.{' '}
-            <a
-              href={`https://apify.com/${source.apifyActorId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-vloom-accent hover:underline"
-            >
-              View Actor →
-            </a>
+        {/* Results after search: stay on same page */}
+        {lastSearchResult && (
+          <div className="mt-8 space-y-4">
+            {lastSearchResult.ok ? (
+              <>
+                <div className="rounded-xl border p-4 flex items-center justify-between gap-4 bg-green-500/10 border-green-500/30 text-green-800 dark:bg-green-500/10 dark:border-green-500/30 dark:text-green-200">
+                  <p className="text-sm">
+                    <span className="font-medium">{lastSearchResult.imported} new</span> imported,{' '}
+                    {lastSearchResult.skipped} already in list. Total from Apify: {lastSearchResult.totalFromApify}.
+                  </p>
+                  {onDismissResult && (
+                    <button
+                      type="button"
+                      onClick={onDismissResult}
+                      className="p-1.5 rounded-lg text-vloom-muted hover:bg-vloom-border/50 hover:text-vloom-text"
+                      aria-label="Dismiss"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+
+                {onSaveSearch && (
+                  <div className="rounded-xl border border-vloom-border bg-vloom-surface p-4">
+                    <h3 className="text-sm font-medium text-vloom-text mb-3">Save this search</h3>
+                    <p className="text-xs text-vloom-muted mb-3">
+                      Every run is saved automatically in Saved searches. Optionally give a custom name to re-run easily (e.g. &quot;Video Editors Daily&quot;).
+                    </p>
+                    {savedSearchId ? (
+                      <p className="text-sm text-vloom-accent">Saved. It will appear in Saved searches.</p>
+                    ) : (
+                      <div className="flex flex-wrap items-end gap-2">
+                        <input
+                          type="text"
+                          value={saveName}
+                          onChange={(e) => setSaveName(e.target.value)}
+                          placeholder="Search name"
+                          className="flex-1 min-w-[200px] px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg"
+                        />
+                        <button
+                          type="button"
+                          disabled={!saveName.trim() || savingSearch}
+                          onClick={async () => {
+                            setSavingSearch(true);
+                            setSaveError(null);
+                            try {
+                              const id = await onSaveSearch({
+                                name: saveName.trim(),
+                                actor_id: source.apifyActorId,
+                                input: formData,
+                              });
+                              setSavedSearchId(id as string);
+                            } catch (e) {
+                              setSaveError(e instanceof Error ? e.message : String(e));
+                            } finally {
+                              setSavingSearch(false);
+                            }
+                          }}
+                          className="flex items-center gap-2 px-4 py-2 bg-vloom-accent text-white rounded-lg text-sm hover:bg-vloom-accent-hover disabled:opacity-50"
+                        >
+                          {savingSearch ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                          Save search
+                        </button>
+                      </div>
+                    )}
+                    {saveError && <p className="mt-2 text-sm text-red-600">{saveError}</p>}
+                  </div>
+                )}
+
+                <SearchResultsTable key={lastSearchResult.scrapingJobId} scrapingJobId={lastSearchResult.scrapingJobId} />
+              </>
+            ) : (
+              <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-500/10 dark:border-red-500/30 p-4 text-red-800 dark:text-red-200 text-sm flex items-center justify-between gap-4">
+                <p>{lastSearchResult.error}</p>
+                {onDismissResult && (
+                  <button
+                    type="button"
+                    onClick={onDismissResult}
+                    className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20"
+                    aria-label="Dismiss"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-8 p-4 bg-vloom-border/30 rounded-xl space-y-2">
+          <p className="text-xs text-vloom-muted">
+            These fields are sent to the job source. Results are saved to your leads list. Everything runs inside this app.
           </p>
+          {source.apifyActorId === 'harvestapi/linkedin-job-search' && (
+            <details className="text-xs text-vloom-muted">
+              <summary className="cursor-pointer hover:text-vloom-text">How these fields are used (LinkedIn Jobs)</summary>
+              <ul className="mt-2 pl-4 list-disc space-y-0.5">
+                <li>Job titles / Keywords → <code className="bg-vloom-border/50 px-1 rounded">jobTitles</code></li>
+                <li>Locations → <code className="bg-vloom-border/50 px-1 rounded">locations</code></li>
+                <li>Date posted → <code className="bg-vloom-border/50 px-1 rounded">postedLimit</code></li>
+                <li>Max results → <code className="bg-vloom-border/50 px-1 rounded">maxItems</code></li>
+                <li>Sort by → <code className="bg-vloom-border/50 px-1 rounded">sort</code></li>
+              </ul>
+            </details>
+          )}
         </div>
       </main>
     </div>

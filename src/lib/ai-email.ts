@@ -1,7 +1,7 @@
 // =====================================================
-// LEADFLOW - AI Email Generator (Claude API)
+// Leadflow Vloom - AI Email Generator (Claude API)
 // =====================================================
-import { supabase } from './supabase';
+import { supabase, getCurrentUser } from './supabase';
 import type { Lead, EmailTemplate } from '@/types/database';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
@@ -73,30 +73,30 @@ export class AIEmailGenerator {
     senderRole?: string
   ): string {
     const toneDescriptions = {
-      professional: 'formal pero cercano, directo y respetuoso del tiempo del destinatario',
-      casual: 'relajado y conversacional, como si hablaras con un colega',
-      friendly: 'cálido y entusiasta, mostrando genuino interés',
+      professional: 'formal but approachable, direct and respectful of the recipient\'s time',
+      casual: 'relaxed and conversational, as if talking to a colleague',
+      friendly: 'warm and enthusiastic, showing genuine interest',
     };
 
-    return `Eres un experto en outreach de ventas B2B. Tu trabajo es escribir emails de primer contacto que:
-1. Sean personalizados y muestren que investigaste sobre la empresa/persona
-2. Tengan un hook inicial que capture atención en los primeros 2 segundos
-3. Sean concisos (máximo 150 palabras en el cuerpo)
-4. Tengan un CTA claro y fácil de responder
-5. NO suenen genéricos ni como spam
+    return `You are an expert in B2B sales outreach. Your job is to write first-touch emails that:
+1. Are personalized and show you researched the company/person
+2. Have an opening hook that captures attention in the first 2 seconds
+3. Are concise (max 150 words in the body)
+4. Have a clear, easy-to-answer CTA
+5. Do NOT sound generic or like spam
 
-Tono: ${toneDescriptions[tone as keyof typeof toneDescriptions] || toneDescriptions.professional}
+Tone: ${toneDescriptions[tone as keyof typeof toneDescriptions] || toneDescriptions.professional}
 
-Información del remitente:
-- Nombre: ${senderName}
-${senderCompany ? `- Empresa: ${senderCompany}` : ''}
-${senderRole ? `- Rol: ${senderRole}` : ''}
+Sender information:
+- Name: ${senderName}
+${senderCompany ? `- Company: ${senderCompany}` : ''}
+${senderRole ? `- Role: ${senderRole}` : ''}
 
-IMPORTANTE: Responde SOLO en el siguiente formato JSON:
+IMPORTANT: Respond ONLY in the following JSON format:
 {
-  "subject": "Línea de asunto del email",
-  "body": "Cuerpo del email con saltos de línea como \\n",
-  "reasoning": "Breve explicación de por qué este approach funcionará"
+  "subject": "Email subject line",
+  "body": "Email body with line breaks as \\n",
+  "reasoning": "Brief explanation of why this approach will work"
 }`;
   }
 
@@ -106,43 +106,43 @@ IMPORTANTE: Responde SOLO en el siguiente formato JSON:
     customPrompt?: string
   ): string {
     const leadInfo = `
-INFORMACIÓN DEL LEAD:
-- Nombre del contacto: ${lead.contact_name || 'No disponible'}
-- Título/Rol: ${lead.contact_title || 'No disponible'}
-- Empresa: ${lead.company_name || 'No disponible'}
-- Industria: ${lead.company_industry || 'No disponible'}
-- Tamaño de empresa: ${lead.company_size || 'No disponible'}
-- Descripción de la empresa: ${lead.company_description || 'No disponible'}
+LEAD INFORMATION:
+- Contact name: ${lead.contact_name || 'Not available'}
+- Title/Role: ${lead.contact_title || 'Not available'}
+- Company: ${lead.company_name || 'Not available'}
+- Industry: ${lead.company_industry || 'Not available'}
+- Company size: ${lead.company_size || 'Not available'}
+- Company description: ${lead.company_description || 'Not available'}
 
-INFORMACIÓN DEL JOB POST QUE PUBLICARON:
-- Título del puesto: ${lead.job_title || 'No disponible'}
-- Descripción: ${lead.job_description?.slice(0, 500) || 'No disponible'}
-- Ubicación: ${lead.job_location || 'No disponible'}
-- Salario: ${lead.job_salary_range || 'No disponible'}
+JOB POST THEY PUBLISHED:
+- Job title: ${lead.job_title || 'Not available'}
+- Description: ${lead.job_description?.slice(0, 500) || 'Not available'}
+- Location: ${lead.job_location || 'Not available'}
+- Salary: ${lead.job_salary_range || 'Not available'}
 `;
 
     let prompt = leadInfo;
 
     if (template) {
       prompt += `
-TEMPLATE BASE A USAR (personaliza y mejora):
-Asunto: ${template.subject}
-Cuerpo: ${template.body_template}
+BASE TEMPLATE TO USE (customize and improve):
+Subject: ${template.subject}
+Body: ${template.body_template}
 
-${template.ai_prompt ? `INSTRUCCIONES ADICIONALES: ${template.ai_prompt}` : ''}
+${template.ai_prompt ? `ADDITIONAL INSTRUCTIONS: ${template.ai_prompt}` : ''}
 `;
     }
 
     if (customPrompt) {
       prompt += `
-INSTRUCCIONES ESPECÍFICAS DEL USUARIO:
+USER-SPECIFIC INSTRUCTIONS:
 ${customPrompt}
 `;
     }
 
     prompt += `
-Genera un email de outreach personalizado basado en esta información. 
-El email debe hacer referencia específica a algo del job post o la empresa para demostrar que no es un email masivo.
+Generate a personalized outreach email based on this information.
+The email must specifically reference something from the job post or the company to show it is not a mass email.
 `;
 
     return prompt;
@@ -150,26 +150,26 @@ El email debe hacer referencia específica a algo del job post o la empresa para
 
   private parseEmailResponse(content: string): GeneratedEmail {
     try {
-      // Intentar parsear como JSON
+      // Try to parse as JSON
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         return {
-          subject: parsed.subject || 'Colaboración profesional',
+          subject: parsed.subject || 'Professional collaboration',
           body: parsed.body || content,
           reasoning: parsed.reasoning,
         };
       }
     } catch {
-      // Si falla el parsing, extraer manualmente
+      // If parsing fails, extract manually
     }
 
-    // Fallback: extraer subject y body del texto
+    // Fallback: extract subject and body from text
     const subjectMatch = content.match(/(?:subject|asunto)[:\s]*([^\n]+)/i);
     const bodyMatch = content.match(/(?:body|cuerpo)[:\s]*([\s\S]+)/i);
 
     return {
-      subject: subjectMatch?.[1]?.trim() || 'Colaboración profesional',
+      subject: subjectMatch?.[1]?.trim() || 'Professional collaboration',
       body: bodyMatch?.[1]?.trim() || content,
     };
   }
@@ -211,19 +211,19 @@ El email debe hacer referencia específica a algo del job post o la empresa para
         messages: [
           {
             role: 'user',
-            content: `Mejora este email basándote en el feedback:
+            content: `Improve this email based on the feedback:
 
-EMAIL ACTUAL:
-Asunto: ${currentSubject}
-Cuerpo: ${currentBody}
+CURRENT EMAIL:
+Subject: ${currentSubject}
+Body: ${currentBody}
 
 FEEDBACK: ${feedback}
 
-Responde en formato JSON:
+Respond in JSON format:
 {
-  "subject": "Nuevo asunto",
-  "body": "Nuevo cuerpo",
-  "reasoning": "Qué cambiaste y por qué"
+  "subject": "New subject",
+  "body": "New body",
+  "reasoning": "What you changed and why"
 }`,
           },
         ],
@@ -241,19 +241,13 @@ Responde en formato JSON:
 
 // Factory function
 export async function createAIEmailGenerator(): Promise<AIEmailGenerator> {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('team_id')
-    .single();
-
-  if (!profile?.team_id) {
-    throw new Error('No team found');
-  }
+  const user = await getCurrentUser();
+  if (!user || !supabase) throw new Error('You must be logged in.');
 
   const { data: apiKey } = await supabase
     .from('api_keys')
     .select('api_key_encrypted')
-    .eq('team_id', profile.team_id)
+    .eq('user_id', user.id)
     .eq('service', 'anthropic')
     .eq('is_active', true)
     .single();

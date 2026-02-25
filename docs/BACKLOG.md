@@ -53,6 +53,11 @@ Items preparados para la próxima. 40-60% claros.
 
 ## Completado
 
+- [x] Eliminación completa de teams (migración 008 + tipos + apify, sendgrid, ai-email, Edge Function, UI)
+- [x] Team flow documentado (TEAM_FLOW.md); saved_searches con team opcional + backfill últimas 3 búsquedas
+- [x] Saved searches nav from New Search shows list (set view to app on sidebar navigate)
+- [x] Auto-save every search run to Saved searches (Edge Function creates saved_search + links job)
+- [x] Results table shows imported leads after search (key by scrapingJobId + useLeads filter sync)
 - [x] Sidebar visible al abrir LinkedIn Jobs en Discovery (SearchConfigPage dentro de AppLayout)
 - [x] Comunicación de la plataforma en inglés (UI: filtros, CRM, leads, mensajes)
 - [x] Estructura inicial (React, Supabase, Apify, SendGrid, Claude)

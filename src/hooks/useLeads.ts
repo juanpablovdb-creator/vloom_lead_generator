@@ -1,5 +1,5 @@
 // =====================================================
-// LEADFLOW - useLeads Hook
+// Leadflow Vloom - useLeads Hook
 // =====================================================
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -83,6 +83,16 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // Sync filters when parent passes new initialFilters (e.g. new scraping_job_id after a search)
+  useEffect(() => {
+    const nextJobId = initialFilters?.scraping_job_id;
+    const nextSavedId = initialFilters?.saved_search_id;
+    setFilters((prev) => {
+      if (prev.scraping_job_id === nextJobId && prev.saved_search_id === nextSavedId) return prev;
+      return { ...prev, scraping_job_id: nextJobId, saved_search_id: nextSavedId };
+    });
+  }, [initialFilters?.scraping_job_id, initialFilters?.saved_search_id]);
+
   // Build query based on filters (only when Supabase is configured)
   const buildQuery = useCallback(() => {
     if (!supabase) return null;
@@ -159,6 +169,11 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     // Only show rows user marked as lead (for "Leads" / CRM view)
     if (filters.marked_as_lead_only === true) {
       query = query.eq('is_marked_as_lead', true);
+    }
+
+    // Single run filter (e.g. results after New Search)
+    if (filters.scraping_job_id) {
+      query = query.eq('scraping_job_id', filters.scraping_job_id);
     }
 
     // Sorting

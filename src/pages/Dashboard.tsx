@@ -1,5 +1,5 @@
 // =====================================================
-// LEADFLOW - Main Dashboard Page
+// Leadflow Vloom - Main Dashboard Page
 // =====================================================
 import React, { useState, useMemo, useCallback } from 'react';
 import {
@@ -28,7 +28,6 @@ const MOCK_TEMPLATES: EmailTemplate[] = [
   {
     id: '1',
     user_id: '',
-    team_id: null,
     is_shared: true,
     name: 'Initial Outreach',
     subject: 'Quick question about {{job_title}} role',
@@ -44,7 +43,6 @@ const MOCK_PRESETS: ScoringPreset[] = [
   {
     id: '1',
     user_id: '',
-    team_id: null,
     name: 'Startup Focus',
     description: 'Prioritize smaller companies',
     weights: {
@@ -215,7 +213,7 @@ export default function DashboardPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center gap-3">
-              <span className="text-lg font-semibold text-vloom-text">Vloom Lead Generator</span>
+              <span className="text-lg font-semibold text-vloom-text">Leadflow Vloom</span>
             </div>
 
             <nav className="flex items-center gap-1">
@@ -312,7 +310,7 @@ export default function DashboardPage() {
                             className="w-full px-4 py-2 text-left text-sm text-vloom-text hover:bg-vloom-bg flex items-center gap-2"
                           >
                             <Share2 className="w-4 h-4 text-vloom-accent" />
-                            Share with Team
+                            Share
                           </button>
                           <hr className="my-2" />
                           <button
@@ -425,7 +423,7 @@ export default function DashboardPage() {
         {currentView === 'settings' && (
           <div className="max-w-2xl mx-auto bg-vloom-surface rounded-xl border border-vloom-border p-6">
             <h2 className="text-lg font-semibold text-vloom-text mb-4">Settings</h2>
-            <p className="text-vloom-muted">API keys and team settings coming soon...</p>
+            <p className="text-vloom-muted">API keys and settings coming soon...</p>
           </div>
         )}
       </main>

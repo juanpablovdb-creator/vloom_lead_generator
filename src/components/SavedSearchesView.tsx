@@ -1,10 +1,10 @@
 // =====================================================
-// LEADFLOW - Saved searches list + Run + New saved search
+// Leadflow Vloom - Saved searches list + Run + New saved search
 // =====================================================
 import { useState, useCallback } from 'react';
 import { Play, Plus, Loader2, Trash2 } from 'lucide-react';
 import { useSavedSearches } from '@/hooks/useSavedSearches';
-import { runLinkedInJobSearch } from '@/lib/apify';
+import { runJobSearchViaEdge } from '@/lib/apify';
 import type { RunLinkedInSearchResult } from '@/lib/apify';
 import { supabase } from '@/lib/supabase';
 
@@ -16,22 +16,23 @@ export interface SavedSearchesViewProps {
 }
 
 export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesViewProps) {
-  const { savedSearches, isLoading, error, createSavedSearch, deleteSavedSearch } = useSavedSearches();
+  const { savedSearches, isLoading, error, createSavedSearch, deleteSavedSearch, updateSavedSearch } =
+    useSavedSearches();
   const [runningId, setRunningId] = useState<string | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newJobTitles, setNewJobTitles] = useState('');
   const [newLocations, setNewLocations] = useState('');
-  const [newPostedLimit, setNewPostedLimit] = useState<'Past 24 hours' | 'Past Week' | 'Past Month'>('Past 24 hours');
-  const [newMaxItems, setNewMaxItems] = useState(24);
+  const [newPostedLimit, setNewPostedLimit] = useState<'Past 1 hour' | 'Past 24 hours' | 'Past Week' | 'Past Month'>('Past 1 hour');
+  const [newMaxItems, setNewMaxItems] = useState(500);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const handleRun = useCallback(
-    async (id: string) => {
+    async (id: string, actorId: string) => {
       setRunningId(id);
       try {
-        const result = await runLinkedInJobSearch({ input: {}, savedSearchId: id });
+        const result = await runJobSearchViaEdge({ actorId, savedSearchId: id });
         onRunComplete(result);
       } catch (err) {
         onRunError(err instanceof Error ? err.message : String(err));
@@ -70,7 +71,7 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
       setNewName('');
       setNewJobTitles('');
       setNewLocations('');
-      setNewPostedLimit('Past 24 hours');
+      setNewPostedLimit('Past 1 hour');
       setNewMaxItems(24);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : String(err));
@@ -146,6 +147,7 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
             onChange={(e) => setNewPostedLimit(e.target.value as typeof newPostedLimit)}
             className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg"
           >
+            <option value="Past 1 hour">Past 1 hour</option>
             <option value="Past 24 hours">Past 24 hours</option>
             <option value="Past Week">Past week</option>
             <option value="Past Month">Past month</option>
@@ -204,10 +206,22 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
                   <p className="font-medium text-vloom-text truncate">{s.name}</p>
                   <p className="text-sm text-vloom-muted truncate">{summary || 'LinkedIn Jobs'}</p>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <label
+                    className="flex items-center gap-2 text-sm text-vloom-muted cursor-pointer"
+                    title="When on, this search will be eligible for automatic re-runs (scheduling coming soon)"
+                  >
+                    <span>Autorun</span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(s.autorun)}
+                      onChange={(e) => updateSavedSearch(s.id, { autorun: e.target.checked })}
+                      className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent"
+                    />
+                  </label>
                   <button
                     type="button"
-                    onClick={() => handleRun(s.id)}
+                    onClick={() => handleRun(s.id, s.actor_id)}
                     disabled={isRunning}
                     className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-vloom-accent text-white text-sm hover:bg-vloom-accent-hover disabled:opacity-50"
                   >

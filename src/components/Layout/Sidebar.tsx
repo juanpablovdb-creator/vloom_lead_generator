@@ -1,5 +1,5 @@
 // =====================================================
-// Vloom Lead Generator - Sidebar (layout wearevloom.com)
+// Leadflow Vloom - Sidebar (layout wearevloom.com)
 // =====================================================
 import React, { useState } from 'react';
 import {
@@ -11,6 +11,7 @@ import {
   BarChart3,
   ChevronDown,
   ChevronRight,
+  LogOut,
 } from 'lucide-react';
 
 export type SectionId = 'tasks' | 'discovery' | 'crm' | 'kpis';
@@ -20,6 +21,8 @@ export interface SidebarProps {
   activeSection: SectionId;
   activeDiscoverySub?: DiscoverySubId;
   onNavigate: (section: SectionId, discoverySub?: DiscoverySubId) => void;
+  userEmail?: string | null;
+  onSignOut?: () => void;
 }
 
 const DISCOVERY_SUBS: { id: DiscoverySubId; label: string; icon: React.ReactNode }[] = [
@@ -28,7 +31,7 @@ const DISCOVERY_SUBS: { id: DiscoverySubId; label: string; icon: React.ReactNode
   { id: 'leads-lists', label: 'Leads lists', icon: <List className="w-4 h-4" /> },
 ];
 
-export function Sidebar({ activeSection, activeDiscoverySub, onNavigate }: SidebarProps) {
+export function Sidebar({ activeSection, activeDiscoverySub, onNavigate, userEmail, onSignOut }: SidebarProps) {
   const [discoveryOpen, setDiscoveryOpen] = useState(activeSection === 'discovery');
 
   const navItem = (
@@ -118,7 +121,22 @@ export function Sidebar({ activeSection, activeDiscoverySub, onNavigate }: Sideb
         {navItem('kpis', 'KPIs', <BarChart3 className="w-4 h-4" />)}
       </nav>
 
-      <div className="p-3 border-t border-vloom-border">
+      <div className="p-3 border-t border-vloom-border space-y-2">
+        {userEmail != null && (
+          <p className="text-xs text-vloom-muted truncate" title={userEmail}>
+            {userEmail}
+          </p>
+        )}
+        {onSignOut && (
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium text-vloom-muted hover:text-vloom-text hover:bg-vloom-border/50 transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+            Sign out
+          </button>
+        )}
         <p className="text-xs text-vloom-muted">
           <a href="https://wearevloom.com" target="_blank" rel="noopener noreferrer" className="hover:text-vloom-text transition-colors">
             wearevloom.com

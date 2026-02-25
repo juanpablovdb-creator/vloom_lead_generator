@@ -1,5 +1,5 @@
 // =====================================================
-// Vloom Lead Generator - Error Boundary
+// Leadflow Vloom - Error Boundary
 // =====================================================
 // Si algo lanza en la app, mostramos este mensaje en vez de pantalla en blanco.
 // =====================================================
@@ -22,7 +22,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Vloom Lead Generator ErrorBoundary:', error, errorInfo);
+    console.error('Leadflow Vloom ErrorBoundary:', error, errorInfo);
   }
 
   render() {

@@ -1,5 +1,5 @@
 // =====================================================
-// Vloom Lead Generator - App layout (sidebar + main)
+// Leadflow Vloom - App layout (sidebar + main)
 // Layout reference: wearevloom.com
 // =====================================================
 import React from 'react';
@@ -10,6 +10,8 @@ export interface AppLayoutProps {
   activeDiscoverySub?: DiscoverySubId;
   onNavigate: (section: SectionId, discoverySub?: DiscoverySubId) => void;
   children: React.ReactNode;
+  userEmail?: string | null;
+  onSignOut?: () => void;
 }
 
 export function AppLayout({
@@ -17,6 +19,8 @@ export function AppLayout({
   activeDiscoverySub,
   onNavigate,
   children,
+  userEmail,
+  onSignOut,
 }: AppLayoutProps) {
   return (
     <div className="flex min-h-screen bg-vloom-bg">
@@ -24,6 +28,8 @@ export function AppLayout({
         activeSection={activeSection}
         activeDiscoverySub={activeDiscoverySub}
         onNavigate={onNavigate}
+        userEmail={userEmail}
+        onSignOut={onSignOut}
       />
       <main className="flex-1 overflow-auto">
         {children}
