@@ -2,6 +2,7 @@
 // Receives: actorId, input?, savedSearchId?. Uses JWT for Supabase RLS. Returns { scrapingJobId, imported, skipped, totalFromApify }.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { computeLeadScore } from "../_shared/leadScore.ts";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const LINKEDIN_JOBS_ACTOR = "harvestapi/linkedin-job-search";
@@ -37,6 +38,8 @@ interface JobResult {
   postedAt?: string;
   source: string;
   externalId?: string;
+  /** Recruiter / job poster name if the actor returns it (e.g. recruiterName, poster.name). */
+  recruiterName?: string;
 }
 
 function toArray(v: unknown): string[] {
@@ -107,6 +110,16 @@ function normalizeHarvestApiJobs(items: Record<string, unknown>[]): JobResult[] 
                 : "501+"
         : undefined;
 
+    const poster = item.poster as Record<string, unknown> | undefined;
+    const jobPoster = item.jobPoster as Record<string, unknown> | undefined;
+    const hiringTeam = item.hiringTeam as Array<{ name?: string }> | undefined;
+    const recruiterName =
+      str(item.recruiterName) ||
+      str(item.posterName) ||
+      (poster && "name" in poster ? str(poster.name) : "") ||
+      (jobPoster && "name" in jobPoster ? str(jobPoster.name) : "") ||
+      (Array.isArray(hiringTeam) && hiringTeam[0]?.name ? str(hiringTeam[0].name) : "");
+
     return {
       title: str(item.title) || str(item.jobTitle) || str(item.Title) || "Job",
       company: companyName,
@@ -117,6 +130,7 @@ function normalizeHarvestApiJobs(items: Record<string, unknown>[]): JobResult[] 
       companyWebsite: str(company?.website) || str(item.companyWebsite) || "",
       location: locationText,
       salary: salaryText,
+      recruiterName: recruiterName || undefined,
       description:
         str(item.descriptionText) ||
         str(item.description) ||
@@ -160,11 +174,13 @@ Deno.serve(async (req: Request) => {
     { global: { headers: { Authorization: authHeader } } }
   );
 
-  const { data: { user }, error: userError } = await supabase.auth.getUser(
-    authHeader.replace("Bearer ", "")
-  );
+  const jwt = authHeader.replace("Bearer ", "").trim();
+  const { data: { user }, error: userError } = await supabase.auth.getUser(jwt);
   if (userError || !user) {
-    return new Response(JSON.stringify({ error: "You must be logged in to run a search." }), {
+    const reason = userError?.message?.toLowerCase().includes("expired")
+      ? "Session expired. Please sign in again."
+      : userError?.message ?? "You must be logged in to run a search.";
+    return new Response(JSON.stringify({ error: reason }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -248,23 +264,25 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // Insert with explicit columns only (no team_id) to avoid schema-cache issues
+  const jobPayload: Record<string, unknown> = {
+    user_id: user.id,
+    actor_id: LINKEDIN_JOBS_ACTOR,
+    run_id: null,
+    saved_search_id: resolvedSavedSearchId,
+    search_query: searchQuery,
+    search_location: params.locations?.join(", ") ?? null,
+    search_filters: searchFilters,
+    status: "running",
+    leads_found: 0,
+    leads_imported: 0,
+    error_message: null,
+    started_at: new Date().toISOString(),
+    completed_at: null,
+  };
   const { data: jobRow, error: insertJobError } = await supabase
     .from("scraping_jobs")
-    .insert({
-      user_id: user.id,
-      actor_id: LINKEDIN_JOBS_ACTOR,
-      run_id: null,
-      saved_search_id: resolvedSavedSearchId,
-      search_query: searchQuery,
-      search_location: params.locations?.join(", ") ?? null,
-      search_filters: searchFilters,
-      status: "running",
-      leads_found: 0,
-      leads_imported: 0,
-      error_message: null,
-      started_at: new Date().toISOString(),
-      completed_at: null,
-    })
+    .insert(jobPayload as Record<string, never>)
     .select("id")
     .single();
 
@@ -412,6 +430,15 @@ Deno.serve(async (req: Request) => {
       if (job.companySize != null) enrichment_data.companySize = job.companySize;
       if (job.companyWebsite != null) enrichment_data.companyWebsite = job.companyWebsite;
       if (job.externalId != null) enrichment_data.externalId = job.externalId;
+      const score = computeLeadScore({
+        job_location: job.location ?? null,
+        company_location: null,
+        company_size: job.companySize ?? null,
+        company_funding: null,
+        job_description: job.description ?? null,
+        notes: null,
+        enrichment_data,
+      });
       return {
         user_id: user.id,
         is_shared: false,
@@ -433,7 +460,12 @@ Deno.serve(async (req: Request) => {
         company_location: null,
         company_industry: null,
         company_funding: null,
+        contact_name: job.recruiterName ?? null,
+        contact_title: null,
+        contact_email: null,
+        contact_linkedin_url: null,
         status: "backlog",
+        score,
         enrichment_data,
         tags: [],
       };

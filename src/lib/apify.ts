@@ -29,29 +29,47 @@ export interface RunLinkedInSearchResult {
  * Uses fetch so we can always read the response body and show the real error on non-2xx.
  * If the Edge Function is not deployed or unreachable, falls back to runJobSearch (requires Apify key in api_keys table).
  */
+async function fetchWithAuth(
+  url: string,
+  body: Record<string, unknown>,
+  token: string
+): Promise<Response> {
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 export async function runJobSearchViaEdge(options: {
   actorId: string;
   input?: Record<string, unknown>;
   savedSearchId?: string;
 }): Promise<RunLinkedInSearchResult> {
   if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
-  // Force a token refresh so the Edge Function gets a valid JWT (getSession() can return expired token)
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('You must be logged in to run a search.');
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
-  if (!token) throw new Error('Session expired. Please sign in again.');
   const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/run-job-search`;
+
+  const getToken = async (): Promise<string> => {
+    const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError || !session?.user) {
+      throw new Error('You must be logged in to run a search. Please sign in again.');
+    }
+    const token = session.access_token;
+    if (!token) throw new Error('Session expired. Please sign in again.');
+    return token;
+  };
+
+  let token = await getToken();
   let response: Response;
   try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(options),
-    });
+    response = await fetchWithAuth(url, options, token);
+    if (response.status === 401) {
+      token = await getToken();
+      response = await fetchWithAuth(url, options, token);
+    }
   } catch (networkErr) {
     const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
     const isUnreachable = /fetch failed|NetworkError|Failed to fetch/i.test(msg);
@@ -71,6 +89,7 @@ export async function runJobSearchViaEdge(options: {
     }
     throw new Error(msg);
   }
+
   const text = await response.text();
   let body: {
     error?: string | { code?: number; message?: string };
@@ -105,8 +124,15 @@ export async function runJobSearchViaEdge(options: {
               : text || `Edge Function returned ${response.status}`;
     let message = toErrorString(raw);
     if (!message) message = text || `Edge Function returned ${response.status}`;
-    if (response.status === 401 && /Invalid JWT|invalid.*jwt|unauthorized/i.test(message))
-      message = 'Session expired or invalid. Please sign in again.';
+    if (response.status === 401) {
+      if (/Invalid JWT|invalid.*jwt|unauthorized|expired|session expired/i.test(message)) {
+        message =
+          'Sesión no reconocida (a veces por la migración JWT en Supabase). Solución: en la raíz del proyecto ejecuta: npx supabase functions deploy run-job-search --no-verify-jwt. Luego cierra sesión, vuelve a entrar y prueba de nuevo.';
+      } else if (/must be logged in/i.test(message)) {
+        message =
+          'Sesión no reconocida. Ejecuta: npx supabase functions deploy run-job-search --no-verify-jwt. Luego cierra sesión y vuelve a entrar.';
+      }
+    }
     throw new Error(message);
   }
   if (body?.error) throw new Error(toErrorString(body.error));
@@ -116,6 +142,142 @@ export async function runJobSearchViaEdge(options: {
     imported: body.imported ?? 0,
     skipped: body.skipped ?? 0,
     totalFromApify: body.totalFromApify ?? 0,
+  };
+}
+
+/**
+ * Send selected job results to Leads: mark as lead + backlog, then enrich company data via Harvest API LinkedIn Company.
+ * Call from Saved Searches results when user clicks "Send to leads".
+ */
+export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
+  sent: number;
+  enriched: number;
+}> {
+  if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
+  if (!leadIds.length) return { sent: 0, enriched: 0 };
+
+  const { error: updateError } = await supabase
+    .from('leads')
+    .update({
+      is_marked_as_lead: true,
+      status: 'backlog',
+      updated_at: new Date().toISOString(),
+    })
+    .in('id', leadIds);
+
+  if (updateError) throw new Error(updateError.message);
+
+  const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/enrich-lead-companies`;
+  const getToken = async (): Promise<string> => {
+    const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError || !session?.user) throw new Error('You must be logged in. Please sign in again.');
+    const token = session.access_token;
+    if (!token) throw new Error('Session expired. Please sign in again.');
+    return token;
+  };
+
+  let token = await getToken();
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ leadIds }),
+    });
+    if (response.status === 401) {
+      token = await getToken();
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ leadIds }),
+      });
+    }
+  } catch (networkErr) {
+    const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    throw new Error(
+      `Enrichment failed. Deploy with: npx supabase functions deploy enrich-lead-companies and set APIFY_API_TOKEN in Secrets. ${msg}`
+    );
+  }
+
+  const text = await response.text();
+  let body: { error?: string; ok?: boolean; enriched?: number; total?: number };
+  try {
+    body = text ? (JSON.parse(text) as typeof body) : {};
+  } catch {
+    body = {};
+  }
+  if (!response.ok) {
+    throw new Error(typeof body?.error === 'string' ? body.error : text || `Enrichment returned ${response.status}`);
+  }
+  return {
+    sent: leadIds.length,
+    enriched: body?.enriched ?? 0,
+  };
+}
+
+/**
+ * Recompute lead scores with the Clay-style formula (location, size, revenue, remote).
+ * Pass leadIds to recompute only those leads; omit to recompute all user's leads.
+ */
+export async function recomputeLeadScores(leadIds?: string[]): Promise<{ updated: number; total: number }> {
+  if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
+  const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/recompute-lead-scores`;
+  const getToken = async (): Promise<string> => {
+    const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError || !session?.user) throw new Error('You must be logged in. Please sign in again.');
+    const token = session.access_token;
+    if (!token) throw new Error('Session expired. Please sign in again.');
+    return token;
+  };
+  const token = await getToken();
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(leadIds != null ? { leadIds } : {}),
+    });
+  } catch (networkErr) {
+    const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    const isFailedToFetch = /failed to fetch|networkerror|load failed/i.test(msg);
+    if (isFailedToFetch) {
+      throw new Error(
+        'Could not reach the function. Deploy it with: npx supabase functions deploy recompute-lead-scores'
+      );
+    }
+    throw networkErr;
+  }
+  const text = await response.text();
+  let body: { error?: string; code?: number; message?: string; ok?: boolean; updated?: number; total?: number };
+  try {
+    body = text ? (JSON.parse(text) as typeof body) : {};
+  } catch {
+    body = {};
+  }
+  if (!response.ok) {
+    if (response.status === 401 && (body?.code === 401 || body?.message?.toLowerCase().includes('jwt'))) {
+      throw new Error(
+        'Invalid or expired session. Sign out, sign in again, then try Recalculate scores. If it persists, deploy with: npx supabase functions deploy recompute-lead-scores --no-verify-jwt'
+      );
+    }
+    const errMsg =
+      typeof body?.error === 'string'
+        ? body.error
+        : (body?.message ?? text) || `recompute-lead-scores returned ${response.status}`;
+    throw new Error(errMsg);
+  }
+  return {
+    updated: body?.updated ?? 0,
+    total: body?.total ?? 0,
   };
 }
 
@@ -523,6 +685,10 @@ export async function saveJobsAsLeads(
       company_location: null,
       company_industry: null,
       company_funding: null,
+      contact_name: job.recruiterName ?? null,
+      contact_title: null,
+      contact_email: null,
+      contact_linkedin_url: null,
       status: 'backlog' as const,
       enrichment_data,
       tags: [],

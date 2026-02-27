@@ -35,11 +35,11 @@ ALTER TABLE leads ALTER COLUMN status SET DEFAULT 'backlog';
 -- =====================================================
 -- PARTE 2: Saved searches + link leads to scraping runs
 -- =====================================================
+-- Idempotent: saved_searches without team_id (008 removes it); index on leads by user_id or team_id.
 
--- TABLA: saved_searches (IF NOT EXISTS para re-ejecución idempotente)
+-- TABLA: saved_searches (sin team_id para que funcione con o sin 008)
 CREATE TABLE IF NOT EXISTS saved_searches (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     actor_id VARCHAR(255) NOT NULL,
@@ -48,16 +48,35 @@ CREATE TABLE IF NOT EXISTS saved_searches (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_saved_searches_team_id ON saved_searches(team_id);
+-- team_id opcional: si existe la tabla teams, añadir columna (007/008 lo gestionan)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'teams') THEN
+    ALTER TABLE saved_searches ADD COLUMN IF NOT EXISTS team_id UUID REFERENCES teams(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'saved_searches' AND column_name = 'team_id') THEN
+    CREATE INDEX IF NOT EXISTS idx_saved_searches_team_id ON saved_searches(team_id);
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_saved_searches_user_id ON saved_searches(user_id);
 
 ALTER TABLE saved_searches ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Users can view team saved searches" ON saved_searches;
-CREATE POLICY "Users can view team saved searches" ON saved_searches
-    FOR SELECT USING (
-        team_id IN (SELECT team_id FROM profiles WHERE id = auth.uid())
-    );
+DROP POLICY IF EXISTS "Users can view own saved searches" ON saved_searches;
+-- SELECT: por equipo si hay team_id, si no solo propios
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'saved_searches' AND column_name = 'team_id') THEN
+    EXECUTE 'CREATE POLICY "Users can view team saved searches" ON saved_searches FOR SELECT USING (team_id IN (SELECT team_id FROM public.profiles WHERE id = auth.uid()))';
+  ELSE
+    EXECUTE 'CREATE POLICY "Users can view own saved searches" ON saved_searches FOR SELECT USING (auth.uid() = user_id)';
+  END IF;
+END $$;
 
 DROP POLICY IF EXISTS "Users can insert own saved searches" ON saved_searches;
 CREATE POLICY "Users can insert own saved searches" ON saved_searches
@@ -87,4 +106,13 @@ ALTER TABLE leads
     ADD COLUMN IF NOT EXISTS job_external_id VARCHAR(255);
 
 CREATE INDEX IF NOT EXISTS idx_leads_scraping_job_id ON leads(scraping_job_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_job_external_id ON leads(team_id, job_external_id) WHERE job_external_id IS NOT NULL;
+
+DROP INDEX IF EXISTS idx_leads_job_external_id;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'leads' AND column_name = 'team_id') THEN
+    CREATE UNIQUE INDEX idx_leads_job_external_id ON leads(team_id, job_external_id) WHERE job_external_id IS NOT NULL;
+  ELSE
+    CREATE UNIQUE INDEX idx_leads_job_external_id ON leads(user_id, job_external_id) WHERE job_external_id IS NOT NULL;
+  END IF;
+END $$;

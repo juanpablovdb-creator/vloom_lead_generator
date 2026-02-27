@@ -1,17 +1,53 @@
 // =====================================================
 // Leadflow Vloom - CRM view (Kanban + Tabla + useLeads)
 // =====================================================
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { LayoutGrid, List } from 'lucide-react';
+import { recomputeLeadScores } from '@/lib/apify';
 import { useLeads } from '@/hooks/useLeads';
 import { getDisplayLeadsForView } from '@/lib/leadViewUtils';
 import type { LeadViewBy } from '@/types/database';
 import { CRMKanban } from './CRMKanban';
 import { LeadsTable } from '@/components/LeadsTable';
 
+const CRM_PREFS_KEY = 'leadflow_crm_preferences';
+
 type CRMViewMode = 'kanban' | 'table';
 
+interface CRMPreferences {
+  viewMode: CRMViewMode;
+  marked_as_lead_only?: boolean;
+  view_by?: LeadViewBy;
+}
+
+function getCRMPreferences(): CRMPreferences {
+  try {
+    const raw = localStorage.getItem(CRM_PREFS_KEY);
+    if (!raw) return { viewMode: 'table' };
+    const parsed = JSON.parse(raw) as Partial<CRMPreferences>;
+    return {
+      viewMode: parsed.viewMode === 'kanban' ? 'kanban' : 'table',
+      marked_as_lead_only: parsed.marked_as_lead_only === true ? true : undefined,
+      view_by: parsed.view_by === 'company' ? 'company' : 'person',
+    };
+  } catch {
+    return { viewMode: 'table' };
+  }
+}
+
+function setCRMPreferences(prefs: Partial<CRMPreferences>) {
+  try {
+    const prev = getCRMPreferences();
+    const next = { ...prev, ...prefs };
+    localStorage.setItem(CRM_PREFS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
+
 export function CRMView() {
+  const [initialPrefs] = useState(getCRMPreferences);
+
   const {
     leads,
     isLoading,
@@ -27,12 +63,36 @@ export function CRMView() {
     selectAll,
     clearSelection,
     isAllSelected,
+    refreshLeads,
   } = useLeads({
     pageSize: 500,
-    initialFilters: {},
+    initialFilters: {
+      marked_as_lead_only: initialPrefs.marked_as_lead_only,
+      view_by: initialPrefs.view_by,
+    },
   });
 
-  const [viewMode, setViewMode] = useState<CRMViewMode>('table');
+  const [viewMode, setViewMode] = useState<CRMViewMode>(() => initialPrefs.viewMode);
+  const [recomputingScores, setRecomputingScores] = useState(false);
+
+  const handleRecomputeScores = useCallback(async () => {
+    setRecomputingScores(true);
+    try {
+      await recomputeLeadScores();
+      await refreshLeads();
+    } finally {
+      setRecomputingScores(false);
+    }
+  }, [refreshLeads]);
+
+  // Persist CRM preferences when view or filters change (remember when switching tabs)
+  useEffect(() => {
+    setCRMPreferences({
+      viewMode,
+      marked_as_lead_only: filters.marked_as_lead_only,
+      view_by: filters.view_by,
+    });
+  }, [viewMode, filters.marked_as_lead_only, filters.view_by]);
   const { displayLeads, groupSizeByLeadId } = useMemo(
     () => getDisplayLeadsForView(leads, filters.view_by),
     [leads, filters.view_by]
@@ -106,6 +166,14 @@ export function CRMView() {
               By companies
             </button>
           </div>
+          <button
+            type="button"
+            onClick={handleRecomputeScores}
+            disabled={recomputingScores}
+            className="text-sm text-vloom-muted hover:text-vloom-text disabled:opacity-50"
+          >
+            {recomputingScores ? 'Recalculating…' : 'Recalculate scores'}
+          </button>
         </div>
       </div>
 

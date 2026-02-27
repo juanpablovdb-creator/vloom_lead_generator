@@ -7,9 +7,11 @@ import type { SectionId, DiscoverySubId } from '@/components/Layout';
 import { HomePage, LeadSource } from '@/pages/HomePage';
 import { SearchConfigPage } from '@/pages/SearchConfigPage';
 import { CRMView } from '@/components/CRM';
-import { runJobSearchViaEdge } from '@/lib/apify';
+import { LeadsTable } from '@/components/LeadsTable';
+import { runJobSearchViaEdge, recomputeLeadScores } from '@/lib/apify';
 import { SavedSearchesView } from '@/components/SavedSearchesView';
 import { useSavedSearches } from '@/hooks/useSavedSearches';
+import { useLeads } from '@/hooks/useLeads';
 
 type View = 'app' | 'search-config';
 
@@ -72,14 +74,15 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
             ? String((err as { message: unknown }).message)
             : String(err);
       const errStr = typeof msg === 'string' ? msg : String(err);
-      if (/team_id|schema cache/i.test(errStr)) {
-        setLastSearchResult({
-          ok: false,
-          error: 'Database schema cache is stale after removing teams. In Supabase Dashboard → SQL Editor run: NOTIFY pgrst, \'reload schema\'; then try again.',
-        });
-      } else {
-        setLastSearchResult({ ok: false, error: errStr });
-      }
+      const isSchemaCache = /team_id|schema cache|could not find.*column/i.test(errStr);
+      const schemaHint =
+        isSchemaCache
+          ? "\n\n---\n1) Pause project then Restore (Project Settings → General). Wait 2–3 min until STATUS is stable. 2) In SQL Editor run the script: supabase/migrations/009_ensure_no_team_id_reload_schema.sql. Wait 30–60 sec, then try again."
+          : "";
+      setLastSearchResult({
+        ok: false,
+        error: errStr + schemaHint,
+      });
     }
   }, []);
 
@@ -128,7 +131,7 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
         />
       )}
       {section === 'discovery' && discoverySub === 'leads-lists' && (
-        <LeadsListsPlaceholder lastSearchResult={lastSearchResult} onDismissResult={() => setLastSearchResult(null)} />
+        <LeadsListView lastSearchResult={lastSearchResult} onDismissResult={() => setLastSearchResult(null)} />
       )}
       {section === 'crm' && <CRMView />}
       {section === 'kpis' && <KPIsPlaceholder />}
@@ -158,22 +161,96 @@ function DiscoveryNewSearchPlaceholder({ onSelectSource }: { onSelectSource: (s:
   );
 }
 
-function LeadsListsPlaceholder({
+function LeadsListView({
   lastSearchResult,
   onDismissResult,
 }: {
   lastSearchResult: LastSearchResult;
   onDismissResult: () => void;
 }) {
+  const {
+    leads,
+    totalCount,
+    isLoading,
+    error,
+    filters,
+    updateFilter,
+    sort,
+    setSort,
+    pagination,
+    setPage,
+    refreshLeads,
+    updateLead,
+    updateLeadStatus,
+    deleteLead,
+    deleteLeads,
+    selectedIds,
+    toggleSelection,
+    selectAll,
+    clearSelection,
+    isAllSelected,
+  } = useLeads({
+    initialFilters: { marked_as_lead_only: true },
+    pageSize: 25,
+  });
+
+  const [recomputingScores, setRecomputingScores] = useState(false);
+  const handleRecomputeScores = useCallback(async () => {
+    setRecomputingScores(true);
+    try {
+      await recomputeLeadScores();
+      await refreshLeads();
+    } finally {
+      setRecomputingScores(false);
+    }
+  }, [refreshLeads]);
+
+  const noop = () => {};
+  const handleDeleteLead = useCallback(
+    async (lead: { id: string }) => {
+      await deleteLead(lead.id);
+    },
+    [deleteLead]
+  );
+  const handleDeleteSelected = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    await deleteLeads(ids);
+    clearSelection();
+  }, [selectedIds, deleteLeads, clearSelection]);
+
+  if (error) {
+    return (
+      <div className="p-4 md:p-6">
+        <h1 className="text-lg font-semibold text-vloom-text mb-4">Leads</h1>
+        <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-500/10 dark:border-red-500/30 p-4 text-sm text-red-800 dark:text-red-200">
+          {error}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 md:p-6">
-      <h1 className="text-lg font-semibold text-vloom-text mb-4">Leads lists</h1>
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+        <h1 className="text-lg font-semibold text-vloom-text">Leads</h1>
+        <label className="flex items-center gap-2 text-sm text-vloom-text cursor-pointer">
+          <input
+            type="checkbox"
+            checked={filters.marked_as_lead_only === true}
+            onChange={(e) => updateFilter('marked_as_lead_only', e.target.checked ? true : undefined)}
+            className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent"
+          />
+          Marked leads only
+        </label>
+      </div>
+
       {lastSearchResult && (
         <div
           className={`mb-4 rounded-lg border p-4 text-sm ${
             lastSearchResult.ok
-              ? 'border-green-200 bg-green-50 text-green-800'
-              : 'border-red-200 bg-red-50 text-red-800'
+              ? 'border-green-200 bg-green-50 dark:bg-green-500/10 text-green-800 dark:text-green-200'
+              : 'border-red-200 bg-red-50 dark:bg-red-500/10 text-red-800 dark:text-red-200'
           }`}
         >
           {lastSearchResult.ok ? (
@@ -196,8 +273,88 @@ function LeadsListsPlaceholder({
           </button>
         </div>
       )}
-      <div className="bg-vloom-surface border border-vloom-border rounded-lg p-6 text-center text-vloom-muted text-sm">
-        Full leads table and filters: coming soon. Run a search from New Search to import jobs first.
+
+      <div className="rounded-xl border border-vloom-border bg-vloom-surface overflow-hidden">
+        <div className="p-3 border-b border-vloom-border flex items-center justify-between">
+          <span className="text-sm font-medium text-vloom-text">
+            {totalCount} lead{totalCount !== 1 ? 's' : ''}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRecomputeScores}
+              disabled={recomputingScores}
+              className="text-xs text-vloom-muted hover:text-vloom-text disabled:opacity-50"
+            >
+              {recomputingScores ? 'Recalculating…' : 'Recalculate scores'}
+            </button>
+            <span className="text-vloom-muted">·</span>
+            <button
+              type="button"
+              onClick={() => refreshLeads()}
+              className="text-xs text-vloom-muted hover:text-vloom-text"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+        <LeadsTable
+          leads={leads}
+          isLoading={isLoading}
+          sort={sort}
+          onSortChange={setSort}
+          selectedIds={selectedIds}
+          onToggleSelection={toggleSelection}
+          onSelectAll={selectAll}
+          onClearSelection={clearSelection}
+          isAllSelected={isAllSelected}
+          onGenerateEmail={noop}
+          onSendEmail={noop}
+          onEnrich={noop}
+          onDelete={(lead) => handleDeleteLead(lead)}
+          onStatusChange={(lead, status) => updateLeadStatus(lead.id, status)}
+          onToggleShare={noop}
+          onViewDetails={noop}
+          onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
+          selectionAction={
+            selectedIds.size > 0 ? (
+              <button
+                type="button"
+                onClick={handleDeleteSelected}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-500/50 text-red-400 hover:bg-red-500/10 text-sm font-medium"
+              >
+                Delete selected ({selectedIds.size})
+              </button>
+            ) : undefined
+          }
+        />
+        {totalCount > pagination.pageSize && (
+          <div className="p-3 border-t border-vloom-border flex items-center justify-between text-sm text-vloom-muted">
+            <span>
+              Showing {(pagination.page - 1) * pagination.pageSize + 1} to{' '}
+              {Math.min(pagination.page * pagination.pageSize, totalCount)} of {totalCount}
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPage(pagination.page - 1)}
+                disabled={pagination.page === 1}
+                className="px-2 py-1 rounded hover:bg-vloom-border disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <span className="px-2 py-1 bg-vloom-border rounded">{pagination.page}</span>
+              <button
+                type="button"
+                onClick={() => setPage(pagination.page + 1)}
+                disabled={pagination.page * pagination.pageSize >= totalCount}
+                className="px-2 py-1 rounded hover:bg-vloom-border disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

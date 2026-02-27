@@ -253,7 +253,12 @@ CREATE TABLE IF NOT EXISTS api_keys (
 -- INDEXES para performance (IF NOT EXISTS para re-ejecución idempotente)
 -- =====================================================
 CREATE INDEX IF NOT EXISTS idx_leads_user_id ON leads(user_id);
-CREATE INDEX IF NOT EXISTS idx_leads_team_id ON leads(team_id);
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'leads' AND column_name = 'team_id') THEN
+    CREATE INDEX IF NOT EXISTS idx_leads_team_id ON leads(team_id);
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(score DESC);
 CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at DESC);
@@ -271,7 +276,12 @@ CREATE INDEX IF NOT EXISTS idx_scraping_jobs_status ON scraping_jobs(status);
 -- ROW LEVEL SECURITY (RLS)
 -- =====================================================
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'teams') THEN
+    ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
+  END IF;
+END $$;
 ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scoring_presets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE email_templates ENABLE ROW LEVEL SECURITY;
@@ -288,23 +298,28 @@ DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
 CREATE POLICY "Users can update own profile" ON profiles
     FOR UPDATE USING (auth.uid() = id);
 
-DROP POLICY IF EXISTS "Users can view team members" ON profiles;
-CREATE POLICY "Users can view team members" ON profiles
-    FOR SELECT USING (
-        team_id IN (SELECT team_id FROM profiles WHERE id = auth.uid())
-    );
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'team_id') THEN
+    DROP POLICY IF EXISTS "Users can view team members" ON profiles;
+    CREATE POLICY "Users can view team members" ON profiles
+      FOR SELECT USING (team_id IN (SELECT team_id FROM profiles WHERE id = auth.uid()));
+  END IF;
+END $$;
 
 -- Leads: usuarios ven sus leads y los compartidos del equipo
 DROP POLICY IF EXISTS "Users can view own leads" ON leads;
 CREATE POLICY "Users can view own leads" ON leads
     FOR SELECT USING (auth.uid() = user_id);
 
-DROP POLICY IF EXISTS "Users can view shared team leads" ON leads;
-CREATE POLICY "Users can view shared team leads" ON leads
-    FOR SELECT USING (
-        is_shared = TRUE AND 
-        team_id IN (SELECT team_id FROM profiles WHERE id = auth.uid())
-    );
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'leads' AND column_name = 'team_id') THEN
+    DROP POLICY IF EXISTS "Users can view shared team leads" ON leads;
+    CREATE POLICY "Users can view shared team leads" ON leads
+      FOR SELECT USING (is_shared = TRUE AND team_id IN (SELECT team_id FROM profiles WHERE id = auth.uid()));
+  END IF;
+END $$;
 
 DROP POLICY IF EXISTS "Users can insert own leads" ON leads;
 CREATE POLICY "Users can insert own leads" ON leads
@@ -323,12 +338,14 @@ DROP POLICY IF EXISTS "Users can manage own templates" ON email_templates;
 CREATE POLICY "Users can manage own templates" ON email_templates
     FOR ALL USING (auth.uid() = user_id);
 
-DROP POLICY IF EXISTS "Users can view shared team templates" ON email_templates;
-CREATE POLICY "Users can view shared team templates" ON email_templates
-    FOR SELECT USING (
-        is_shared = TRUE AND 
-        team_id IN (SELECT team_id FROM profiles WHERE id = auth.uid())
-    );
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'email_templates' AND column_name = 'team_id') THEN
+    DROP POLICY IF EXISTS "Users can view shared team templates" ON email_templates;
+    CREATE POLICY "Users can view shared team templates" ON email_templates
+      FOR SELECT USING (is_shared = TRUE AND team_id IN (SELECT team_id FROM profiles WHERE id = auth.uid()));
+  END IF;
+END $$;
 
 -- Emails Sent: solo el usuario que envió
 DROP POLICY IF EXISTS "Users can manage own sent emails" ON emails_sent;
@@ -340,15 +357,18 @@ DROP POLICY IF EXISTS "Users can manage own scraping jobs" ON scraping_jobs;
 CREATE POLICY "Users can manage own scraping jobs" ON scraping_jobs
     FOR ALL USING (auth.uid() = user_id);
 
--- API Keys: solo admins del equipo
-DROP POLICY IF EXISTS "Team admins can manage api keys" ON api_keys;
-CREATE POLICY "Team admins can manage api keys" ON api_keys
-    FOR ALL USING (
-        team_id IN (
-            SELECT team_id FROM profiles 
-            WHERE id = auth.uid() AND role IN ('owner', 'admin')
-        )
-    );
+-- API Keys: por equipo si existe team_id, si no por user_id (008)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'api_keys' AND column_name = 'team_id') THEN
+    DROP POLICY IF EXISTS "Team admins can manage api keys" ON api_keys;
+    CREATE POLICY "Team admins can manage api keys" ON api_keys
+      FOR ALL USING (team_id IN (SELECT team_id FROM profiles WHERE id = auth.uid() AND role IN ('owner', 'admin')));
+  ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'api_keys' AND column_name = 'user_id') THEN
+    DROP POLICY IF EXISTS "Users can manage own api keys" ON api_keys;
+    CREATE POLICY "Users can manage own api keys" ON api_keys FOR ALL USING (auth.uid() = user_id);
+  END IF;
+END $$;
 
 -- =====================================================
 -- FUNCTIONS
@@ -424,17 +444,24 @@ CREATE TRIGGER on_auth_user_created
 -- DATOS INICIALES
 -- =====================================================
 
--- Template de email por defecto (solo si no existe y hay al menos un usuario, para no violar FK user_id)
-INSERT INTO email_templates (id, user_id, team_id, name, subject, body_template, ai_prompt, is_shared)
-SELECT
-    '00000000-0000-0000-0000-000000000001'::uuid,
-    u.id,
-    NULL,
-    'Outreach Inicial - Video Editor',
-    'Colaboración en edición de video para {{company_name}}',
-    E'Hola {{contact_name}},\n\nVi que {{company_name}} está buscando un {{job_title}} y me pareció muy interesante la oportunidad.\n\n[PERSONALIZACIÓN_AI]\n\n¿Tendrías 15 minutos esta semana para una llamada rápida?\n\nSaludos,\n[TU_NOMBRE]',
-    'Genera un párrafo personalizado mencionando algo específico sobre la empresa o el rol que demuestre investigación genuina. Mantén un tono profesional pero cercano.',
-    FALSE
-FROM auth.users u
-WHERE NOT EXISTS (SELECT 1 FROM email_templates WHERE id = '00000000-0000-0000-0000-000000000001')
-LIMIT 1;
+-- Template de email por defecto (solo si no existe; columnas según schema por si 008 ya eliminó team_id)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM email_templates WHERE id = '00000000-0000-0000-0000-000000000001') THEN
+    NULL;
+  ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'email_templates' AND column_name = 'team_id') THEN
+    INSERT INTO email_templates (id, user_id, team_id, name, subject, body_template, ai_prompt, is_shared)
+    SELECT '00000000-0000-0000-0000-000000000001'::uuid, u.id, NULL,
+      'Outreach Inicial - Video Editor', 'Colaboración en edición de video para {{company_name}}',
+      E'Hola {{contact_name}},\n\nVi que {{company_name}} está buscando un {{job_title}} y me pareció muy interesante la oportunidad.\n\n[PERSONALIZACIÓN_AI]\n\n¿Tendrías 15 minutos esta semana para una llamada rápida?\n\nSaludos,\n[TU_NOMBRE]',
+      'Genera un párrafo personalizado mencionando algo específico sobre la empresa o el rol que demuestre investigación genuina. Mantén un tono profesional pero cercano.', FALSE
+    FROM auth.users u LIMIT 1;
+  ELSE
+    INSERT INTO email_templates (id, user_id, name, subject, body_template, ai_prompt, is_shared)
+    SELECT '00000000-0000-0000-0000-000000000001'::uuid, u.id,
+      'Outreach Inicial - Video Editor', 'Colaboración en edición de video para {{company_name}}',
+      E'Hola {{contact_name}},\n\nVi que {{company_name}} está buscando un {{job_title}} y me pareció muy interesante la oportunidad.\n\n[PERSONALIZACIÓN_AI]\n\n¿Tendrías 15 minutos esta semana para una llamada rápida?\n\nSaludos,\n[TU_NOMBRE]',
+      'Genera un párrafo personalizado mencionando algo específico sobre la empresa o el rol que demuestre investigación genuina. Mantén un tono profesional pero cercano.', FALSE
+    FROM auth.users u LIMIT 1;
+  END IF;
+END $$;

@@ -24,6 +24,7 @@ import {
 import type { LeadSource } from './HomePage';
 import { useLeads } from '@/hooks/useLeads';
 import { LeadsTable } from '@/components/LeadsTable';
+import { supabase } from '@/lib/supabase';
 
 // =====================================================
 // APIFY ACTOR INPUT SCHEMAS
@@ -465,6 +466,36 @@ function SearchResultsTable({ scrapingJobId }: { scrapingJobId: string }) {
   );
 }
 
+function RefreshSessionButton({ onSuccess }: { onSuccess: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const handleRefresh = async () => {
+    if (!supabase) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.refreshSession();
+      if (error) throw error;
+      if (data?.session) {
+        onSuccess();
+      } else {
+        throw new Error('No session');
+      }
+    } catch {
+      setLoading(false);
+    }
+    setLoading(false);
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleRefresh}
+      disabled={loading}
+      className="mt-3 px-3 py-1.5 rounded-lg bg-amber-200/80 dark:bg-amber-500/30 hover:bg-amber-300/80 dark:hover:bg-amber-500/50 font-medium text-amber-900 dark:text-amber-100 disabled:opacity-50"
+    >
+      {loading ? 'Actualizando…' : 'Actualizar sesión y volver a intentar'}
+    </button>
+  );
+}
+
 interface SearchConfigPageProps {
   source: LeadSource;
   onBack: () => void;
@@ -772,13 +803,27 @@ export function SearchConfigPage({
                 <SearchResultsTable key={lastSearchResult.scrapingJobId} scrapingJobId={lastSearchResult.scrapingJobId} />
               </>
             ) : (
-              <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-500/10 dark:border-red-500/30 p-4 text-red-800 dark:text-red-200 text-sm flex items-center justify-between gap-4">
-                <p>{lastSearchResult.error}</p>
+              <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-500/10 dark:border-red-500/30 p-4 text-red-800 dark:text-red-200 text-sm flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="whitespace-pre-line">{lastSearchResult.error}</p>
+                  {onDismissResult && /reload schema|schema cache/i.test(lastSearchResult.error) && (
+                    <button
+                      type="button"
+                      onClick={onDismissResult}
+                      className="mt-3 px-3 py-1.5 rounded-lg bg-red-200/80 dark:bg-red-500/30 hover:bg-red-300/80 dark:hover:bg-red-500/50 font-medium"
+                    >
+                      Try again
+                    </button>
+                  )}
+                  {onDismissResult && /Sesión caducada|Sesión no reconocida|sign in again|logged in/i.test(lastSearchResult.error) && (
+                    <RefreshSessionButton onSuccess={onDismissResult} />
+                  )}
+                </div>
                 {onDismissResult && (
                   <button
                     type="button"
                     onClick={onDismissResult}
-                    className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20"
+                    className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 shrink-0 self-start sm:self-center"
                     aria-label="Dismiss"
                   >
                     <X className="w-5 h-5" />

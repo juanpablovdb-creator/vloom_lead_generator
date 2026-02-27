@@ -225,6 +225,8 @@ export interface ApifyJobResult {
   source: string;
   /** LinkedIn job id for dedup and enrichment_data */
   externalId?: string;
+  /** Recruiter / job poster name when the scraper provides it (e.g. HarvestAPI, other LinkedIn job actors). */
+  recruiterName?: string;
   [key: string]: unknown;
 }
 
@@ -285,7 +287,8 @@ export interface LeadSort {
 }
 
 export interface TableColumn {
-  key: keyof Lead;
+  /** Lead field or virtual key (e.g. enrichment_followerCount for enrichment_data.followerCount). */
+  key: keyof Lead | string;
   label: string;
   visible: boolean;
   width?: number;

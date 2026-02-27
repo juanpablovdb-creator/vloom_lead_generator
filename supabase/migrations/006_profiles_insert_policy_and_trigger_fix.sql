@@ -1,25 +1,17 @@
 -- Leadflow Vloom - Fix "Database error saving new user" (e.g. Google OAuth)
--- Run the ENTIRE file in one go (do not run only the trigger section).
+-- Run the ENTIRE file in one go (Ctrl+A then Run). Statement 1 = policies, Statement 2 = trigger.
 -- 1) RLS: allow insert so the trigger (or session) can create the profile row.
 -- 2) Trigger: SECURITY DEFINER + SET search_path = '' and insert into public.profiles
 --    (per Supabase docs), and get email/name from OAuth metadata when needed.
 
--- Allow insert when the row id is the current user (e.g. client-side first-time profile)
-DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
-CREATE POLICY "Users can insert own profile"
-    ON public.profiles
-    FOR INSERT
-    WITH CHECK (auth.uid() = id);
-
--- Allow insert when no profile exists for this id, only by the trigger (runs as postgres/supabase_admin)
-DROP POLICY IF EXISTS "Allow first profile insert for new user" ON public.profiles;
-CREATE POLICY "Allow first profile insert for new user"
-    ON public.profiles
-    FOR INSERT
-    WITH CHECK (
-        current_user IN ('postgres', 'supabase_admin')
-        AND NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = profiles.id)
-    );
+-- Single block: drop then create both policies (idempotent; safe to run multiple times)
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+  DROP POLICY IF EXISTS "Allow first profile insert for new user" ON public.profiles;
+  EXECUTE 'CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id)';
+  EXECUTE 'CREATE POLICY "Allow first profile insert for new user" ON public.profiles FOR INSERT WITH CHECK (current_user IN (''postgres'', ''supabase_admin'') AND NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = profiles.id))';
+END $$;
 
 -- Trigger function: empty search_path and explicit public.profiles (Supabase recommendation)
 CREATE OR REPLACE FUNCTION public.handle_new_user()

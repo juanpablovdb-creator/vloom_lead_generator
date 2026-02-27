@@ -8,13 +8,36 @@ Guía de los comandos y acciones que **tú** debes ejecutar después de cada ses
 
 ## 0. Si ves "team_id" o "schema cache" al buscar
 
-Tras aplicar migraciones que quitan columnas (p. ej. 008_remove_teams), PostgREST puede seguir usando un esquema en caché antiguo. En **Supabase Dashboard → SQL Editor** ejecuta:
+Tras aplicar migraciones que quitan columnas (p. ej. 008_remove_teams), PostgREST puede seguir usando un esquema en caché antiguo.
 
-```sql
-NOTIFY pgrst, 'reload schema';
-```
+1. **Primero:** En **Supabase Dashboard → SQL Editor** ejecuta `NOTIFY pgrst, 'reload schema';` y espera unos segundos. Vuelve a intentar la búsqueda.
+2. **Si sigue fallando:** La forma más fiable de forzar la recarga del esquema es **pausar y reanudar el proyecto**: Dashboard → **Project Settings** (engranaje) → **General** → **Pause project**. Cuando termine, **Restore project**. Espera a que el proyecto esté en línea y vuelve a intentar.
 
-Luego vuelve a intentar la búsqueda.
+---
+
+## 0b. Si "Leadflow Supabase Schema" da "relation 'profiles' already exists"
+
+Ese script guardado en el SQL Editor es una **copia antigua** del esquema (crea tablas sin `IF NOT EXISTS` y usa `team_id`). **No lo ejecutes** en una base que ya existe.
+
+- **Base ya creada:** aplica el esquema con las **migraciones** en orden. En la raíz del proyecto: `npx supabase db push`. O en SQL Editor: ejecuta cada archivo de `supabase/migrations/` en orden (001, 002, 003, 004, 005, 006, 007, 008).
+- **Proyecto nuevo:** ejecuta las migraciones en orden (001 → 008). No uses el script "Leadflow Supabase Schema" guardado en el dashboard.
+
+Más detalle: `docs/SUPABASE_SCHEMA.md`.
+
+---
+
+## 0c. Si ves "Sesión caducada" y "Actualizar sesión" no basta
+
+1. **JWT expiry** (opcional): En **Project Settings** → **JWT Keys** → "Access token expiry time" puedes subir el valor (p. ej. 3600 o 300000). Guarda.
+2. **Si ya subiste el expiry y sigue fallando**: puede ser por la migración de Supabase de "Legacy JWT secret" a "JWT Signing Keys". El gateway de Edge Functions a veces rechaza el token. **Solución:** desplegar la función desactivando la verificación JWT en el gateway (la función sigue validando el token por dentro):
+
+   En la raíz del proyecto:
+
+   ```bash
+   npx supabase functions deploy run-job-search --no-verify-jwt
+   ```
+
+   Luego cierra sesión en la app, vuelve a entrar y prueba la búsqueda.
 
 ---
 

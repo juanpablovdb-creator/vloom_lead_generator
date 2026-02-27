@@ -28,7 +28,7 @@ export interface SidebarProps {
 const DISCOVERY_SUBS: { id: DiscoverySubId; label: string; icon: React.ReactNode }[] = [
   { id: 'new-search', label: 'New Search', icon: <Search className="w-4 h-4" /> },
   { id: 'saved-searches', label: 'Saved searches', icon: <FolderOpen className="w-4 h-4" /> },
-  { id: 'leads-lists', label: 'Leads lists', icon: <List className="w-4 h-4" /> },
+  { id: 'leads-lists', label: 'Leads', icon: <List className="w-4 h-4" /> },
 ];
 
 export function Sidebar({ activeSection, activeDiscoverySub, onNavigate, userEmail, onSignOut }: SidebarProps) {
