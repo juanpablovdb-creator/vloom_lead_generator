@@ -6,6 +6,8 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
+- **Salida a producción:** Guía completa en `docs/DEPLOY.md`: recomendación (Vercel preferido, Netlify alternativa), checklist previo, paso a paso para Vercel y Netlify, configuración Supabase en producción. Añadidos `vercel.json` y `netlify.toml` con build command, output `dist` y redirects SPA. **Nota:** El build actual falla por errores de TypeScript existentes (tipos Database/Supabase y otros); hay que resolverlos antes del primer deploy o el pipeline fallará.
+- **Tasks al marcar job post como lead:** Al incluir un Job Post como lead (`is_marked_as_lead: true`) se crea automáticamente una tarea tipo "Contactar a {empresa} – {contacto}" vinculada al lead. Migración `011_tasks.sql` (tabla `tasks` con `lead_id`, `title`, `status`). Hook `useTasks`, vista Tasks con lista de tareas y botón "Ver tarjeta" que lleva al CRM. La tarjeta del trabajo queda conectada vía `lead_id`.
 - **Sesión caducada tras subir JWT expiry:** Documentada la causa (migración Legacy JWT → JWT Signing Keys; el gateway de Edge Functions puede rechazar el token). Solución: desplegar con `npx supabase functions deploy run-job-search --no-verify-jwt`. La función sigue validando el JWT con `getUser(jwt)`. Actualizados PASO_A_PASO (0c), SUPABASE_SCHEMA (sección 401/sesión), mensajes de error en `apify.ts` y patrón del botón "Actualizar sesión" en SearchConfigPage.
 - **Eliminación de teams:** Migración `008_remove_teams.sql`: se elimina la tabla `teams` y todas las columnas `team_id` (profiles, leads, scoring_presets, email_templates, scraping_jobs, saved_searches, api_keys). `api_keys` pasa a ser por usuario (`user_id`). RLS simplificado a solo usuario (auth.uid()). Código: tipos sin Team/team_id, getCurrentTeam eliminado, apify/sendgrid/ai-email usan user_id para api_keys, Edge Function sin teamId, UI "Share with Team" → "Share", "Show Team Leads" → "Show shared leads". Ver `docs/TEAM_FLOW.md`.
 - **Team y Saved searches:** Documentado en `docs/TEAM_FLOW.md` qué es un team, para qué sirve y el flujo actual. Migración `007_saved_searches_optional_team_and_backfill.sql`: `saved_searches.team_id` pasa a ser opcional; nueva política RLS para ver propias o del equipo; backfill que crea un `saved_search` por cada una de las **últimas 3** `scraping_jobs` sin `saved_search_id` por usuario y enlaza el job. Edge Function y frontend permiten crear/auto-guardar con `team_id` null.
@@ -27,6 +29,7 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Pendiente de limpieza
 
+- [ ] Corregir errores de TypeScript para que `npm run build` pase (tipos Database/Supabase en hooks y lib, `import.meta.env`, React no usados, etc.) antes del primer deploy a producción.
 - [ ] Revisar imports no usados en componentes.
 - [ ] Unificar clases Tailwind duplicadas (vloom-* vs gray-* residuales).
 - [ ] Verificar que `supabase/migrations/001_initial_schema.sql` existe y está actualizado.

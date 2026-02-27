@@ -203,6 +203,19 @@ export interface ApiKey {
   updated_at: string;
 }
 
+/** Task status (e.g. "Contactar a X" linked to a lead when marked as lead). */
+export type TaskStatus = 'pending' | 'done' | 'cancelled';
+
+export interface Task {
+  id: string;
+  user_id: string;
+  lead_id: string;
+  title: string;
+  status: TaskStatus;
+  created_at: string;
+  updated_at: string;
+}
+
 // =====================================================
 // API Response Types
 // =====================================================
@@ -371,6 +384,11 @@ export interface Database {
         Row: ApiKey;
         Insert: Omit<ApiKey, 'id' | 'created_at' | 'updated_at'>;
         Update: Partial<Omit<ApiKey, 'id' | 'user_id'>>;
+      };
+      tasks: {
+        Row: Task;
+        Insert: Omit<Task, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<Task, 'id' | 'user_id' | 'lead_id'>>;
       };
     };
   };

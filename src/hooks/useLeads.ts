@@ -300,6 +300,8 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
   // CRUD operations (no-op when Supabase not configured)
   const updateLead = useCallback(async (id: string, updates: Partial<Lead>) => {
     if (!supabase) return;
+    const lead = leads.find(l => l.id === id);
+
     const { error: updateError } = await supabase
       .from('leads')
       .update(updates)
@@ -307,10 +309,20 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
 
     if (updateError) throw updateError;
 
-    setLeads(prev => prev.map(lead =>
-      lead.id === id ? { ...lead, ...updates } : lead
-    ));
-  }, []);
+    setLeads(prev => prev.map(l => (l.id === id ? { ...l, ...updates } : l)));
+
+    // When user marks a job post as lead, create a task "Contactar a ..." linked to the lead card
+    if (updates.is_marked_as_lead === true && lead) {
+      const contactLabel = [lead.company_name, lead.contact_name].filter(Boolean).join(' – ') || 'lead';
+      const title = `Contactar a ${contactLabel}`;
+      await supabase.from('tasks').insert({
+        user_id: lead.user_id,
+        lead_id: lead.id,
+        title,
+        status: 'pending',
+      });
+    }
+  }, [leads]);
 
   const deleteLead = useCallback(async (id: string) => {
     if (!supabase) return;

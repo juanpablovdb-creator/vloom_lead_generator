@@ -46,7 +46,7 @@ function setCRMPreferences(prefs: Partial<CRMPreferences>) {
 }
 
 export function CRMView() {
-  const [initialPrefs] = useState(getCRMPreferences);
+  const [initialPrefs] = useState(() => getCRMPreferences());
 
   const {
     leads,
