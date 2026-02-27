@@ -17,6 +17,11 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 const hasEnv = Boolean(supabaseUrl && supabaseAnonKey);
 
+/** Mensaje para mostrar cuando Supabase no está configurado (local vs producción). */
+export const SUPABASE_CONFIG_HINT = import.meta.env.PROD
+  ? 'Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en tu plataforma de deploy (p. ej. Vercel → Settings → Environment Variables) y vuelve a desplegar.'
+  : 'Añade VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY a tu archivo .env.';
+
 export const isSupabaseConfigured = hasEnv;
 /** Base URL for Supabase (used e.g. to call Edge Functions with fetch and read error body). */
 export { supabaseUrl };

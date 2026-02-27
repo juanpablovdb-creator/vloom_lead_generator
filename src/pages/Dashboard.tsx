@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useLeads } from '@/hooks/useLeads';
 import { getDisplayLeadsForView } from '@/lib/leadViewUtils';
+import { SUPABASE_CONFIG_HINT } from '@/lib/supabase';
 import { LeadsTable } from '@/components/LeadsTable';
 import { FilterBar } from '@/components/FilterBar';
 import { JobSearch, JobSearchParams } from '@/components/JobSearch';
@@ -261,10 +262,7 @@ export default function DashboardPage() {
                 <div className="flex-1">
                   <p className="font-medium text-vloom-text">Configuration needed</p>
                   <p className="text-sm text-vloom-muted mt-1">{error}</p>
-                  <p className="text-xs text-vloom-muted mt-2">
-                    Add <code className="bg-vloom-border px-1 rounded">VITE_SUPABASE_URL</code> and{' '}
-                    <code className="bg-vloom-border px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to <code className="bg-vloom-border px-1 rounded">.env</code>.
-                  </p>
+                  <p className="text-xs text-vloom-muted mt-2">{SUPABASE_CONFIG_HINT}</p>
                 </div>
               </div>
             )}

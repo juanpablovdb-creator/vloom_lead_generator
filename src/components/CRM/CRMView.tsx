@@ -5,6 +5,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { LayoutGrid, List } from 'lucide-react';
 import { recomputeLeadScores } from '@/lib/apify';
 import { useLeads } from '@/hooks/useLeads';
+import { SUPABASE_CONFIG_HINT } from '@/lib/supabase';
 import { getDisplayLeadsForView } from '@/lib/leadViewUtils';
 import type { LeadViewBy } from '@/types/database';
 import { CRMKanban } from './CRMKanban';
@@ -105,12 +106,7 @@ export function CRMView() {
         <h1 className="text-lg font-semibold text-vloom-text mb-4">CRM</h1>
         <div className="bg-vloom-surface border border-vloom-border rounded-lg p-4 text-vloom-muted text-sm space-y-2">
           <p>{error}</p>
-          {isNotConfigured && (
-            <p className="text-xs mt-2">
-              Add <code className="bg-vloom-border px-1 rounded">VITE_SUPABASE_URL</code> and{' '}
-              <code className="bg-vloom-border px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to your <code className="bg-vloom-border px-1 rounded">.env</code> file.
-            </p>
-          )}
+          {isNotConfigured && <p className="text-xs mt-2">{SUPABASE_CONFIG_HINT}</p>}
         </div>
       </div>
     );
