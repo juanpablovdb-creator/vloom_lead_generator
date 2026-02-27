@@ -11,9 +11,13 @@ interface CRMCardProps {
 }
 
 export function CRMCard({ lead, onDragStart, onMarkAsLead }: CRMCardProps) {
-  const title = lead.contact_name || lead.company_name || lead.job_title || 'No name';
-  const sub = [lead.company_name, lead.job_title].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
-  const subLine = sub.slice(0, 2).join(' · ') || null;
+  const companyName = lead.company_name || 'No name';
+  const parts: string[] = [];
+  if (lead.company_location) parts.push(lead.company_location);
+  if (lead.job_title) parts.push(lead.job_title);
+  if (lead.contact_name && lead.contact_name !== lead.company_name) parts.push(lead.contact_name);
+  if (lead.company_industry && !parts.includes(lead.company_industry)) parts.push(lead.company_industry);
+  const subLine = parts.slice(0, 3).join(' · ') || null;
 
   return (
     <div
@@ -23,8 +27,8 @@ export function CRMCard({ lead, onDragStart, onMarkAsLead }: CRMCardProps) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-vloom-text truncate">{title}</p>
-          {subLine && <p className="text-xs text-vloom-muted truncate mt-0.5">{subLine}</p>}
+          <p className="text-sm font-medium text-vloom-text truncate">{companyName}</p>
+          {subLine && <p className="text-[11px] text-vloom-muted truncate mt-0.5 leading-tight">{subLine}</p>}
         </div>
         {onMarkAsLead && (
           <button

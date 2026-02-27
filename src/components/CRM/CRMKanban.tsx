@@ -93,7 +93,7 @@ export function CRMKanban({ leads, isLoading, onStatusChange, onMarkAsLead }: CR
           onDragOver={(e) => handleDragOver(e, id)}
           onDragLeave={handleDragLeave}
           onDrop={(e) => handleDrop(e, id)}
-          className={`flex-shrink-0 w-52 rounded-lg border transition-colors ${
+          className={`flex-shrink-0 w-64 min-w-[14rem] rounded-lg border transition-colors ${
             dragOverColumn === id
               ? 'border-vloom-accent bg-vloom-accent/5'
               : 'border-vloom-border bg-vloom-surface/50'

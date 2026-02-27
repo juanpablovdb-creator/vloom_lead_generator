@@ -11,13 +11,20 @@ import { TasksView } from '@/components/TasksView';
 import { LeadsTable } from '@/components/LeadsTable';
 import { runJobSearchViaEdge, recomputeLeadScores } from '@/lib/apify';
 import { SavedSearchesView } from '@/components/SavedSearchesView';
-import { useSavedSearches } from '@/hooks/useSavedSearches';
 import { useLeads } from '@/hooks/useLeads';
 
 type View = 'app' | 'search-config';
 
 type LastSearchResult =
-  | { ok: true; scrapingJobId: string; imported: number; skipped: number; totalFromApify: number }
+  | {
+      ok: true;
+      scrapingJobId: string;
+      imported: number;
+      skipped: number;
+      totalFromApify: number;
+      savedSearchId?: string | null;
+      savedSearchName?: string | null;
+    }
   | { ok: false; error: string }
   | null;
 
@@ -32,7 +39,6 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
   const [view, setView] = useState<View>('app');
   const [selectedSource, setSelectedSource] = useState<LeadSource | null>(null);
   const [lastSearchResult, setLastSearchResult] = useState<LastSearchResult>(null);
-  const { createSavedSearch } = useSavedSearches();
 
   const handleNavigate = useCallback((s: SectionId, sub?: DiscoverySubId) => {
     setSection(s);
@@ -66,6 +72,8 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
         imported: result.imported,
         skipped: result.skipped,
         totalFromApify: result.totalFromApify,
+        savedSearchId: result.savedSearchId ?? null,
+        savedSearchName: result.savedSearchName ?? null,
       });
     } catch (err) {
       const msg =
@@ -103,7 +111,6 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
           onSearch={handleSearch}
           lastSearchResult={lastSearchResult}
           onDismissResult={() => setLastSearchResult(null)}
-          onSaveSearch={createSavedSearch}
         />
       ) : (
         <>
@@ -122,6 +129,8 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
               imported: result.imported,
               skipped: result.skipped,
               totalFromApify: result.totalFromApify,
+              savedSearchId: result.savedSearchId ?? null,
+              savedSearchName: result.savedSearchName ?? null,
             });
             setSection('discovery');
             setDiscoverySub('leads-lists');

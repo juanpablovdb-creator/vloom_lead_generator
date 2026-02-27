@@ -41,6 +41,7 @@ Items en ejecución esta semana. 80-90% claros.
 - [ ] Revisar y ejecutar migraciones Supabase
 - [x] Guía de salida a producción (DEPLOY.md + vercel.json + netlify.toml)
 - [x] Build de producción (TypeScript corregido; npm run build pasa)
+- [x] Saved searches: quitar “Save this search” + renombrado inline sin bug de espacio
 
 ---
 
@@ -56,6 +57,7 @@ Items preparados para la próxima. 40-60% claros.
 
 ## Completado
 
+- [x] Login obligatorio en producción: sin Supabase config en prod → pantalla "Configuración requerida"; con Supabase → AuthPage si no hay usuario.
 - [x] Guía de deploy a producción (docs/DEPLOY.md, Vercel/Netlify, checklist Supabase)
 - [x] Build TS corregido para deploy (vite-env.d.ts, SupabaseClient<any>, guards, aserciones)
 - [x] Tasks al marcar job post como lead: crear tarea "Contactar a …" y conectar a la tarjeta del trabajo (tabla tasks, useTasks, vista Tasks)

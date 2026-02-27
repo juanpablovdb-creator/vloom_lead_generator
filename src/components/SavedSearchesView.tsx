@@ -444,24 +444,23 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
             const summary =
               Array.isArray(jobTitles) ? jobTitles.join(', ') : typeof jobTitles === 'string' ? jobTitles : '';
             const isRunning = runningId === s.id;
+            const isEditing = editingSearchId === s.id;
             return (
               <li
                 key={s.id}
                 className="flex items-center justify-between gap-4 p-4 rounded-lg border border-vloom-border bg-vloom-surface"
               >
-                <button
-                  type="button"
-                  onClick={() => setViewingSearchId(s.id)}
-                  className="min-w-0 flex-1 text-left hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-vloom-accent/30 rounded"
-                >
-                  {editingSearchId === s.id ? (
-                    <p className="font-medium text-vloom-text flex items-center gap-2 flex-wrap">
+                <div className="min-w-0 flex-1 text-left">
+                  {isEditing ? (
+                    <div className="font-medium text-vloom-text flex items-center gap-2 flex-wrap">
                       <List className="w-4 h-4 flex-shrink-0 text-vloom-muted" />
                       <input
                         type="text"
                         value={editingName}
                         onChange={(e) => setEditingName(e.target.value)}
                         onKeyDown={(e) => {
+                          // Prevent any parent key handlers / accidental "activate button" behavior.
+                          e.stopPropagation();
                           if (e.key === 'Enter') {
                             e.preventDefault();
                             const name = editingName.trim();
@@ -471,17 +470,17 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
                             }
                           }
                           if (e.key === 'Escape') {
+                            e.preventDefault();
                             setEditingSearchId(null);
                             setEditingName('');
                           }
                         }}
-                        onClick={(e) => e.stopPropagation()}
                         className="flex-1 min-w-[120px] px-2 py-0.5 rounded border border-vloom-border bg-vloom-bg text-vloom-text text-sm"
+                        autoFocus
                       />
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           const name = editingName.trim();
                           if (name) {
                             updateSavedSearch(s.id, { name });
@@ -495,8 +494,7 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           setEditingSearchId(null);
                           setEditingName('');
                         }}
@@ -505,17 +503,21 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
                       >
                         <X className="w-4 h-4" />
                       </button>
-                    </p>
+                    </div>
                   ) : (
-                    <p className="font-medium text-vloom-text truncate flex items-center gap-2">
-                      <List className="w-4 h-4 flex-shrink-0 text-vloom-muted" />
-                      {s.name}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setViewingSearchId(s.id)}
+                      className="w-full text-left hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-vloom-accent/30 rounded"
+                    >
+                      <p className="font-medium text-vloom-text truncate flex items-center gap-2">
+                        <List className="w-4 h-4 flex-shrink-0 text-vloom-muted" />
+                        {s.name}
+                      </p>
+                      <p className="text-sm text-vloom-muted truncate mt-0.5">{summary || 'LinkedIn Jobs'}</p>
+                    </button>
                   )}
-                  {editingSearchId !== s.id && (
-                    <p className="text-sm text-vloom-muted truncate mt-0.5">{summary || 'LinkedIn Jobs'}</p>
-                  )}
-                </button>
+                </div>
                 <div className="flex items-center gap-3 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                   <button
                     type="button"

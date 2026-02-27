@@ -1,5 +1,6 @@
 // Leadflow Vloom - Edge Function: run job search (Apify) with secret API key
-// Receives: actorId, input?, savedSearchId?. Uses JWT for Supabase RLS. Returns { scrapingJobId, imported, skipped, totalFromApify }.
+// Receives: actorId, input?, savedSearchId?. Uses JWT for Supabase RLS.
+// Returns: { scrapingJobId, imported, skipped, totalFromApify, savedSearchId?, savedSearchName? }.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computeLeadScore } from "../_shared/leadScore.ts";
@@ -205,10 +206,11 @@ Deno.serve(async (req: Request) => {
   }
 
   let rawInput: Record<string, unknown>;
+  let resolvedSavedSearchName: string | null = null;
   if (savedSearchId) {
     const { data: saved, error: savedError } = await supabase
       .from("saved_searches")
-      .select("input")
+      .select("input, name")
       .eq("id", savedSearchId)
       .single();
     if (savedError || !saved?.input) {
@@ -218,6 +220,7 @@ Deno.serve(async (req: Request) => {
       });
     }
     rawInput = (saved.input as Record<string, unknown>) ?? {};
+    resolvedSavedSearchName = typeof saved.name === "string" ? saved.name : null;
   } else {
     rawInput = input ?? {};
   }
@@ -260,6 +263,7 @@ Deno.serve(async (req: Request) => {
       .single();
     if (!savedErr && savedRow?.id) {
       resolvedSavedSearchId = savedRow.id;
+      resolvedSavedSearchName = autoName.slice(0, 255);
       console.log("[run-job-search] auto-created saved_search", resolvedSavedSearchId, autoName);
     }
   }
@@ -487,6 +491,8 @@ Deno.serve(async (req: Request) => {
           imported: 0,
           skipped: jobs.length,
           totalFromApify,
+          savedSearchId: resolvedSavedSearchId,
+          savedSearchName: resolvedSavedSearchName,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -529,6 +535,8 @@ Deno.serve(async (req: Request) => {
         imported: inserted?.length ?? 0,
         skipped: jobs.length - (inserted?.length ?? 0),
         totalFromApify,
+        savedSearchId: resolvedSavedSearchId,
+        savedSearchName: resolvedSavedSearchName,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

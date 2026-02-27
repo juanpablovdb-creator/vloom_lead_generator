@@ -22,6 +22,9 @@ export interface RunLinkedInSearchResult {
   imported: number;
   skipped: number;
   totalFromApify: number;
+  /** Edge function auto-creates one on New Search runs; null if fallback/local run. */
+  savedSearchId?: string | null;
+  savedSearchName?: string | null;
 }
 
 /**
@@ -99,6 +102,8 @@ export async function runJobSearchViaEdge(options: {
     imported?: number;
     skipped?: number;
     totalFromApify?: number;
+    savedSearchId?: string | null;
+    savedSearchName?: string | null;
   };
   try {
     body = text ? (JSON.parse(text) as typeof body) : {};
@@ -143,6 +148,8 @@ export async function runJobSearchViaEdge(options: {
     imported: body.imported ?? 0,
     skipped: body.skipped ?? 0,
     totalFromApify: body.totalFromApify ?? 0,
+    savedSearchId: body.savedSearchId ?? null,
+    savedSearchName: body.savedSearchName ?? null,
   };
 }
 

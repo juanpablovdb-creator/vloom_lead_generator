@@ -131,6 +131,27 @@ El frontend es una SPA estática: no hay servidor propio. Las variables `VITE_SU
 
 ---
 
+## Login con Google en producción (redirect a localhost)
+
+Si al hacer "Continue with Google" en producción te redirige a **localhost** y ves "No se puede acceder a este sitio" (ERR_CONNECTION_REFUSED), es porque Supabase solo tiene permitida la URL local en la configuración de Auth.
+
+**Solución (en Supabase Dashboard):**
+
+1. Entra en [supabase.com](https://supabase.com) → tu proyecto.
+2. **Authentication** (menú izquierdo) → **URL Configuration**.
+3. **Site URL:** pon la URL de tu app en producción, por ejemplo:
+   - `https://vloom-lead-generator.vercel.app`  
+   (sustituye por la URL real que te haya dado Vercel/Netlify).
+4. **Redirect URLs:** en la lista debe aparecer esa misma URL. Añádela si no está:
+   - `https://vloom-lead-generator.vercel.app`
+   - o con comodín: `https://vloom-lead-generator.vercel.app/**`
+   - Si quieres seguir usando login en local, mantén también: `http://localhost:5173` (o el puerto que uses).
+5. Guarda los cambios.
+
+Después de guardar, vuelve a probar "Continue with Google" desde la app en producción; debería redirigir a tu dominio de Vercel/Netlify y completar el login.
+
+---
+
 ## Archivos de configuración en el repo
 
 - **`vercel.json`** – Configuración opcional para Vercel (redirects, headers).

@@ -118,12 +118,6 @@ function SourceCard({ source, onSelect }: { source: LeadSource; onSelect: () => 
       <p className="text-sm text-vloom-muted">
         {source.description}
       </p>
-
-      <div className="mt-4 pt-4 border-t border-vloom-border">
-        <code className="text-xs text-vloom-muted font-mono">
-          {source.apifyActorId}
-        </code>
-      </div>
     </button>
   );
 }
@@ -169,12 +163,6 @@ export function HomePage({ onSelectSource, embedded }: HomePageProps) {
               onSelect={() => onSelectSource(source)}
             />
           ))}
-        </div>
-
-        <div className="mt-12 text-center">
-          <p className="text-xs text-vloom-muted">
-            Apify Actors · Data in Supabase
-          </p>
         </div>
       </main>
     </div>

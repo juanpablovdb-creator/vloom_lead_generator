@@ -17,9 +17,10 @@ import {
   Hash,
   Filter,
   Briefcase,
-  Save,
   X,
   ChevronDown,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import type { LeadSource } from './HomePage';
 import { useLeads } from '@/hooks/useLeads';
@@ -369,7 +370,15 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
 // =====================================================
 
 type LastSearchResult =
-  | { ok: true; scrapingJobId: string; imported: number; skipped: number; totalFromApify: number }
+  | {
+      ok: true;
+      scrapingJobId: string;
+      imported: number;
+      skipped: number;
+      totalFromApify: number;
+      savedSearchId?: string | null;
+      savedSearchName?: string | null;
+    }
   | { ok: false; error: string }
   | null;
 
@@ -502,7 +511,6 @@ interface SearchConfigPageProps {
   onSearch: (source: LeadSource, params: Record<string, unknown>) => Promise<void>;
   lastSearchResult?: LastSearchResult | null;
   onDismissResult?: () => void;
-  onSaveSearch?: (params: { name: string; actor_id: string; input: Record<string, unknown> }) => Promise<unknown>;
 }
 
 export function SearchConfigPage({
@@ -511,15 +519,16 @@ export function SearchConfigPage({
   onSearch,
   lastSearchResult = null,
   onDismissResult,
-  onSaveSearch,
 }: SearchConfigPageProps) {
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [isSearching, setIsSearching] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [saveName, setSaveName] = useState('');
-  const [savingSearch, setSavingSearch] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [savedSearchId, setSavedSearchId] = useState<string | null>(null);
+  const [resultSavedSearchId, setResultSavedSearchId] = useState<string | null>(null);
+  const [resultSavedSearchName, setResultSavedSearchName] = useState<string>('');
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const inputSchema = useMemo(
     () => ACTOR_INPUT_SCHEMAS[source.apifyActorId] || [],
@@ -572,6 +581,49 @@ export function SearchConfigPage({
       await onSearch(source, formData);
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  useEffect(() => {
+    if (lastSearchResult?.ok) {
+      const id = lastSearchResult.savedSearchId ?? null;
+      const name = lastSearchResult.savedSearchName ?? '';
+      setResultSavedSearchId(id);
+      setResultSavedSearchName(name);
+      setRenaming(false);
+      setRenameDraft('');
+      setRenameError(null);
+    } else {
+      setResultSavedSearchId(null);
+      setResultSavedSearchName('');
+      setRenaming(false);
+      setRenameDraft('');
+      setRenameError(null);
+    }
+  }, [lastSearchResult]);
+
+  const persistRename = async () => {
+    const id = resultSavedSearchId;
+    if (!id) return;
+    const name = renameDraft.trim();
+    if (!name) return;
+    if (!supabase) {
+      setRenameError('Supabase not configured.');
+      return;
+    }
+    setRenameSaving(true);
+    setRenameError(null);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await supabase.from('saved_searches').update({ name } as any).eq('id', id);
+      if (error) throw error;
+      setResultSavedSearchName(name);
+      setRenaming(false);
+      setRenameDraft('');
+    } catch (e) {
+      setRenameError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRenameSaving(false);
     }
   };
 
@@ -677,9 +729,6 @@ export function SearchConfigPage({
           <div>
             <h1 className="text-2xl font-bold text-vloom-text">{source.name}</h1>
             <p className="text-vloom-muted">{source.description}</p>
-            <code className="mt-2 inline-block text-xs font-mono text-vloom-muted bg-vloom-border/50 px-2 py-1 rounded">
-              {source.apifyActorId}
-            </code>
           </div>
         </div>
 
@@ -698,18 +747,6 @@ export function SearchConfigPage({
                 <p className="text-sm mt-1">Add it in ACTOR_INPUT_SCHEMAS</p>
               </div>
             )}
-          </div>
-
-          <div className="bg-vloom-border/30 border border-vloom-border rounded-xl p-4">
-            <div className="flex items-start gap-3">
-              <Info className="w-5 h-5 text-vloom-muted flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-vloom-text">
-                <p className="font-medium">Estimated cost</p>
-                <p className="text-vloom-muted mt-1">
-                  ~$0.10 - $0.50 depending on results. Apify compute credits.
-                </p>
-              </div>
-            </div>
           </div>
 
           <button
@@ -753,50 +790,69 @@ export function SearchConfigPage({
                   )}
                 </div>
 
-                {onSaveSearch && (
+                {resultSavedSearchId && (
                   <div className="rounded-xl border border-vloom-border bg-vloom-surface p-4">
-                    <h3 className="text-sm font-medium text-vloom-text mb-3">Save this search</h3>
-                    <p className="text-xs text-vloom-muted mb-3">
-                      Every run is saved automatically in Saved searches. Optionally give a custom name to re-run easily (e.g. &quot;Video Editors Daily&quot;).
-                    </p>
-                    {savedSearchId ? (
-                      <p className="text-sm text-vloom-accent">Saved. It will appear in Saved searches.</p>
-                    ) : (
-                      <div className="flex flex-wrap items-end gap-2">
-                        <input
-                          type="text"
-                          value={saveName}
-                          onChange={(e) => setSaveName(e.target.value)}
-                          placeholder="Search name"
-                          className="flex-1 min-w-[200px] px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg"
-                        />
-                        <button
-                          type="button"
-                          disabled={!saveName.trim() || savingSearch}
-                          onClick={async () => {
-                            setSavingSearch(true);
-                            setSaveError(null);
-                            try {
-                              const id = await onSaveSearch({
-                                name: saveName.trim(),
-                                actor_id: source.apifyActorId,
-                                input: formData,
-                              });
-                              setSavedSearchId(id as string);
-                            } catch (e) {
-                              setSaveError(e instanceof Error ? e.message : String(e));
-                            } finally {
-                              setSavingSearch(false);
-                            }
-                          }}
-                          className="flex items-center gap-2 px-4 py-2 bg-vloom-accent text-white rounded-lg text-sm hover:bg-vloom-accent-hover disabled:opacity-50"
-                        >
-                          {savingSearch ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                          Save search
-                        </button>
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="min-w-0">
+                        <p className="text-xs text-vloom-muted">Saved search</p>
+                        {!renaming ? (
+                          <p className="text-sm font-medium text-vloom-text truncate">
+                            {resultSavedSearchName || 'Untitled'}
+                          </p>
+                        ) : (
+                          <input
+                            type="text"
+                            value={renameDraft}
+                            onChange={(e) => setRenameDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                persistRename();
+                              }
+                              if (e.key === 'Escape') {
+                                e.preventDefault();
+                                setRenaming(false);
+                                setRenameDraft('');
+                                setRenameError(null);
+                              }
+                            }}
+                            className="mt-1 w-full max-w-[520px] px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg"
+                            placeholder="Search name"
+                            autoFocus
+                          />
+                        )}
                       </div>
-                    )}
-                    {saveError && <p className="mt-2 text-sm text-red-600">{saveError}</p>}
+                      <div className="flex items-center gap-2">
+                        {!renaming ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRenaming(true);
+                              setRenameDraft(resultSavedSearchName || '');
+                              setRenameError(null);
+                            }}
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-border/30 text-sm"
+                            title="Rename saved search"
+                          >
+                            <Pencil className="w-4 h-4" />
+                            Rename
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={persistRename}
+                            disabled={renameSaving || !renameDraft.trim()}
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-vloom-accent text-white text-sm hover:bg-vloom-accent-hover disabled:opacity-50"
+                            title="Save name"
+                          >
+                            {renameSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                            Save
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {renameError && <p className="mt-2 text-sm text-red-600">{renameError}</p>}
                   </div>
                 )}
 
@@ -833,24 +889,6 @@ export function SearchConfigPage({
             )}
           </div>
         )}
-
-        <div className="mt-8 p-4 bg-vloom-border/30 rounded-xl space-y-2">
-          <p className="text-xs text-vloom-muted">
-            These fields are sent to the job source. Results are saved to your leads list. Everything runs inside this app.
-          </p>
-          {source.apifyActorId === 'harvestapi/linkedin-job-search' && (
-            <details className="text-xs text-vloom-muted">
-              <summary className="cursor-pointer hover:text-vloom-text">How these fields are used (LinkedIn Jobs)</summary>
-              <ul className="mt-2 pl-4 list-disc space-y-0.5">
-                <li>Job titles / Keywords → <code className="bg-vloom-border/50 px-1 rounded">jobTitles</code></li>
-                <li>Locations → <code className="bg-vloom-border/50 px-1 rounded">locations</code></li>
-                <li>Date posted → <code className="bg-vloom-border/50 px-1 rounded">postedLimit</code></li>
-                <li>Max results → <code className="bg-vloom-border/50 px-1 rounded">maxItems</code></li>
-                <li>Sort by → <code className="bg-vloom-border/50 px-1 rounded">sort</code></li>
-              </ul>
-            </details>
-          )}
-        </div>
       </main>
     </div>
   );
