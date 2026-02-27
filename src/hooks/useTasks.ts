@@ -5,8 +5,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Task, TaskStatus } from '@/types/database';
 
+/** Task with lead's job_url for the "View job" link */
+export interface TaskWithLead extends Task {
+  leads: { job_url: string | null } | null;
+}
+
 interface UseTasksReturn {
-  tasks: Task[];
+  tasks: TaskWithLead[];
   isLoading: boolean;
   error: string | null;
   refreshTasks: () => Promise<void>;
@@ -19,7 +24,7 @@ interface UseTasksReturn {
  * Tasks are created automatically when a user marks a job post as lead.
  */
 export function useTasks(): UseTasksReturn {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<TaskWithLead[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +44,7 @@ export function useTasks(): UseTasksReturn {
     }
     const { data, error: fetchErr } = await supabase
       .from('tasks')
-      .select('*')
+      .select('*, leads(job_url)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
@@ -47,7 +52,7 @@ export function useTasks(): UseTasksReturn {
       setError(fetchErr.message);
       setTasks([]);
     } else {
-      setTasks((data as Task[]) ?? []);
+      setTasks((data as TaskWithLead[]) ?? []);
     }
     setIsLoading(false);
   }, []);
@@ -64,7 +69,7 @@ export function useTasks(): UseTasksReturn {
       .eq('id', id);
 
     if (updateError) throw updateError;
-    setTasks(prev => prev.map(t => (t.id === id ? { ...t, status, updated_at: new Date().toISOString() } : t)));
+    setTasks(prev => prev.map(t => (t.id === id ? { ...t, status, updated_at: new Date().toISOString() } as TaskWithLead : t)));
   }, []);
 
   const deleteTask = useCallback(async (id: string) => {

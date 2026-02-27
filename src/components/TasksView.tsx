@@ -12,8 +12,8 @@ import {
   Circle,
   CheckCircle2,
 } from 'lucide-react';
-import { useTasks } from '@/hooks/useTasks';
-import type { Task, TaskStatus } from '@/types/database';
+import { useTasks, type TaskWithLead } from '@/hooks/useTasks';
+import type { TaskStatus } from '@/types/database';
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   pending: 'Not Started',
@@ -169,7 +169,7 @@ function TasksTableView({
   onNavigateToLead,
   onRefresh,
 }: {
-  tasks: Task[];
+  tasks: TaskWithLead[];
   onStatusChange: (id: string, status: TaskStatus) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onNavigateToLead?: (leadId: string) => void;
@@ -211,7 +211,19 @@ function TasksTableView({
                   key={task.id}
                   className="border-b border-vloom-border/50 last:border-b-0 hover:bg-vloom-surface/50"
                 >
-                  <td className="px-4 py-3 text-sm text-vloom-text font-medium">{task.title}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <span className="font-medium text-vloom-text block">{task.title}</span>
+                    {task.leads?.job_url && (
+                      <a
+                        href={task.leads.job_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-vloom-accent hover:underline mt-0.5 inline-block"
+                      >
+                        View job
+                      </a>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm text-vloom-muted">
                     <span className="inline-flex items-center gap-1">
                       <BarChart3 className="w-4 h-4 opacity-60" />
@@ -308,8 +320,8 @@ function TasksTodoView({
   onNavigateToLead,
   onRefresh,
 }: {
-  pendingTasks: Task[];
-  doneTasks: Task[];
+  pendingTasks: TaskWithLead[];
+  doneTasks: TaskWithLead[];
   todoFilter: TodoFilter;
   onTodoFilterChange: (f: TodoFilter) => void;
   onStatusChange: (id: string, status: TaskStatus) => Promise<void>;
@@ -397,13 +409,14 @@ function TodoTaskRow({
   onDelete,
   onNavigateToLead,
 }: {
-  task: Task;
+  task: TaskWithLead;
   isDoneView: boolean;
   onToggleDone: () => void;
   onDelete: () => void;
   onNavigateToLead?: (leadId: string) => void;
 }) {
   const isChecked = task.status === 'done' || task.status === 'cancelled';
+  const jobUrl = task.leads?.job_url;
 
   return (
     <li className="group flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-vloom-surface/50">
@@ -415,10 +428,22 @@ function TodoTaskRow({
       >
         {isChecked && <CheckCircle2 className="w-4 h-4 text-vloom-accent" />}
       </button>
-      <span
-        className={`flex-1 min-w-0 text-sm ${isChecked ? 'text-vloom-muted line-through' : 'text-vloom-text'}`}
-      >
-        {task.title}
+      <span className="flex-1 min-w-0">
+        <span
+          className={`block text-sm ${isChecked ? 'text-vloom-muted line-through' : 'text-vloom-text'}`}
+        >
+          {task.title}
+        </span>
+        {jobUrl && (
+          <a
+            href={jobUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-vloom-accent hover:underline mt-0.5 inline-block"
+          >
+            View job
+          </a>
+        )}
       </span>
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
         {onNavigateToLead && (
