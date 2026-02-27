@@ -3,7 +3,7 @@
 // =====================================================
 // Si algo lanza en la app, mostramos este mensaje en vez de pantalla en blanco.
 // =====================================================
-import React, { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 interface Props {
   children: ReactNode;

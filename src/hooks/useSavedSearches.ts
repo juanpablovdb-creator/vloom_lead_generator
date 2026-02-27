@@ -46,20 +46,19 @@ export function useSavedSearches() {
       if (!supabase) throw new Error('Supabase not configured');
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('You must be logged in.');
-      const { data, error: err } = await supabase
-        .from('saved_searches')
-        .insert({
-          user_id: user.id,
-          name: params.name,
-          actor_id: params.actor_id,
-          input: params.input,
-          autorun: false,
-        })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error: err } = await supabase.from('saved_searches').insert({
+        user_id: user.id,
+        name: params.name,
+        actor_id: params.actor_id,
+        input: params.input,
+        autorun: false,
+      } as any)
         .select('id')
         .single();
       if (err) throw err;
       await fetchSearches();
-      return data?.id as string;
+      return (data as { id: string } | null)?.id ?? '';
     },
     [fetchSearches]
   );
@@ -74,9 +73,10 @@ export function useSavedSearches() {
   );
 
   const updateSavedSearch = useCallback(
-    async (id: string, updates: { autorun?: boolean }) => {
+    async (id: string, updates: { autorun?: boolean; name?: string }) => {
       if (!supabase) return;
-      await supabase.from('saved_searches').update(updates).eq('id', id);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await supabase.from('saved_searches').update(updates as any).eq('id', id);
       await fetchSearches();
     },
     [fetchSearches]

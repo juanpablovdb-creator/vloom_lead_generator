@@ -10,19 +10,20 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!supabase) {
+    const db = supabase;
+    if (!db) {
       setLoading(false);
       return;
     }
 
     const getInitial = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await db.auth.getSession();
       setUser(session?.user ?? null);
       setLoading(false);
     };
     getInitial();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = db.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
 

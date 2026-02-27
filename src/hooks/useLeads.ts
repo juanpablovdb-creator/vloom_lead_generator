@@ -215,7 +215,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
           .from('scraping_jobs')
           .select('id')
           .eq('saved_search_id', filters.saved_search_id);
-        const jobIds = (jobRows ?? []).map((r) => r.id);
+        const jobIds = ((jobRows ?? []) as { id: string }[]).map((r) => r.id);
         if (jobIds.length === 0) {
           setLeads([]);
           setTotalCount(0);
@@ -253,8 +253,9 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
 
   // Realtime subscription (only when Supabase is configured)
   useEffect(() => {
-    if (!supabase) return;
-    const channel = supabase
+    const db = supabase;
+    if (!db) return;
+    const channel = db
       .channel('leads-changes')
       .on(
         'postgres_changes',
@@ -270,7 +271,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      db.removeChannel(channel);
     };
   }, [fetchLeads]);
 
@@ -302,10 +303,8 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     if (!supabase) return;
     const lead = leads.find(l => l.id === id);
 
-    const { error: updateError } = await supabase
-      .from('leads')
-      .update(updates)
-      .eq('id', id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: updateError } = await supabase.from('leads').update(updates as any).eq('id', id);
 
     if (updateError) throw updateError;
 
@@ -315,12 +314,8 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     if (updates.is_marked_as_lead === true && lead) {
       const contactLabel = [lead.company_name, lead.contact_name].filter(Boolean).join(' – ') || 'lead';
       const title = `Contactar a ${contactLabel}`;
-      await supabase.from('tasks').insert({
-        user_id: lead.user_id,
-        lead_id: lead.id,
-        title,
-        status: 'pending',
-      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await supabase.from('tasks').insert({ user_id: lead.user_id, lead_id: lead.id, title, status: 'pending' } as any);
     }
   }, [leads]);
 

@@ -6,7 +6,6 @@
 // Supabase deben comprobar isSupabaseConfigured.
 // =====================================================
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '@/types/database';
 
 // Always use HTTPS for Supabase (Edge Functions and API); normalize if someone sets http://
 const rawUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -22,8 +21,9 @@ export const isSupabaseConfigured = hasEnv;
 /** Base URL for Supabase (used e.g. to call Edge Functions with fetch and read error body). */
 export { supabaseUrl };
 
-export const supabase: SupabaseClient<Database> | null = hasEnv
-  ? createClient<Database>(supabaseUrl!, supabaseAnonKey!, {
+// SupabaseClient<any> so insert/update accept payloads (Database generic was inferring never in build).
+export const supabase: SupabaseClient<any> | null = hasEnv
+  ? createClient(supabaseUrl!, supabaseAnonKey!, {
       auth: {
         autoRefreshToken: true,
         persistSession: true,

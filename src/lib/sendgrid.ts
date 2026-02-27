@@ -2,7 +2,7 @@
 // Leadflow Vloom - SendGrid Client
 // =====================================================
 import { supabase, getCurrentUser } from './supabase';
-import type { Lead, EmailSent } from '@/types/database';
+import type { ApiKey, Lead, EmailSent } from '@/types/database';
 
 const SENDGRID_API_URL = 'https://api.sendgrid.com/v3';
 
@@ -123,11 +123,12 @@ export async function createSendGridClient(): Promise<SendGridClient> {
     .eq('is_active', true)
     .single();
 
-  if (!apiKey) {
+  const row = apiKey as ApiKey | null;
+  if (!row) {
     throw new Error('SendGrid API key not configured. Please add it in Settings.');
   }
 
-  return new SendGridClient(apiKey.api_key_encrypted);
+  return new SendGridClient(row.api_key_encrypted);
 }
 
 // Send email to a lead and save to history
@@ -156,6 +157,7 @@ export async function sendEmailToLead(params: {
   });
 
   // Obtener usuario actual
+  if (!supabase) throw new Error('Supabase not configured.');
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
@@ -174,23 +176,18 @@ export async function sendEmailToLead(params: {
     metadata: result.error ? { error: result.error } : {},
   };
 
-  const { data: savedEmail, error } = await supabase
-    .from('emails_sent')
-    .insert(emailRecord)
-    .select()
-    .single();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: savedEmail, error } = await supabase.from('emails_sent').insert(emailRecord as any).select().single();
 
   if (error) throw error;
 
   // Actualizar status del lead
   if (result.status === 'sent') {
-    await supabase
-      .from('leads')
-      .update({ status: 'invite_sent' })
-      .eq('id', lead.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await supabase.from('leads').update({ status: 'invite_sent' } as any).eq('id', lead.id);
   }
 
-  return savedEmail;
+  return savedEmail as EmailSent;
 }
 
 // Send emails in bulk

@@ -26,7 +26,7 @@ Items priorizados, sin fecha asignada.
 - [ ] Fuentes Google Maps, LinkedIn People (coming soon → activas)
 - [ ] Tests unitarios / E2E
 - [ ] CI/CD (lint, build en PR)
-- [ ] Deploy a producción (guía en docs/DEPLOY.md; resolver build TS antes)
+- [ ] Deploy a producción (guía en docs/DEPLOY.md; build TS ya pasa)
 
 ---
 
@@ -40,6 +40,7 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Proceso diario (PROCESS.md)
 - [ ] Revisar y ejecutar migraciones Supabase
 - [x] Guía de salida a producción (DEPLOY.md + vercel.json + netlify.toml)
+- [x] Build de producción (TypeScript corregido; npm run build pasa)
 
 ---
 
@@ -56,6 +57,7 @@ Items preparados para la próxima. 40-60% claros.
 ## Completado
 
 - [x] Guía de deploy a producción (docs/DEPLOY.md, Vercel/Netlify, checklist Supabase)
+- [x] Build TS corregido para deploy (vite-env.d.ts, SupabaseClient<any>, guards, aserciones)
 - [x] Tasks al marcar job post como lead: crear tarea "Contactar a …" y conectar a la tarjeta del trabajo (tabla tasks, useTasks, vista Tasks)
 - [x] Eliminación completa de teams (migración 008 + tipos + apify, sendgrid, ai-email, Edge Function, UI)
 - [x] Team flow documentado (TEAM_FLOW.md); saved_searches con team opcional + backfill últimas 3 búsquedas

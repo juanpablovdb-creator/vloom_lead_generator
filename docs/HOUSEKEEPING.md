@@ -6,7 +6,8 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
-- **Salida a producción:** Guía completa en `docs/DEPLOY.md`: recomendación (Vercel preferido, Netlify alternativa), checklist previo, paso a paso para Vercel y Netlify, configuración Supabase en producción. Añadidos `vercel.json` y `netlify.toml` con build command, output `dist` y redirects SPA. **Nota:** El build actual falla por errores de TypeScript existentes (tipos Database/Supabase y otros); hay que resolverlos antes del primer deploy o el pipeline fallará.
+- **Build de producción corregido:** Errores de TypeScript que impedían el deploy resueltos: `src/vite-env.d.ts` para `import.meta.env`, imports React no usados eliminados, GoogleIcon con prop `className`, `updateSavedSearch` acepta `name`, parámetros no usados con prefijo `_`, LeadsTable sort key como `keyof Lead`, guards y aserciones para `supabase` posible null, cliente Supabase tipado como `SupabaseClient<any>` para que insert/update acepten payloads. `npm run build` pasa; Vercel deploy puede ejecutarse.
+- **Salida a producción:** Guía completa en `docs/DEPLOY.md`: recomendación (Vercel preferido, Netlify alternativa), checklist previo, paso a paso para Vercel y Netlify, configuración Supabase en producción. Añadidos `vercel.json` y `netlify.toml` con build command, output `dist` y redirects SPA.
 - **Tasks al marcar job post como lead:** Al incluir un Job Post como lead (`is_marked_as_lead: true`) se crea automáticamente una tarea tipo "Contactar a {empresa} – {contacto}" vinculada al lead. Migración `011_tasks.sql` (tabla `tasks` con `lead_id`, `title`, `status`). Hook `useTasks`, vista Tasks con lista de tareas y botón "Ver tarjeta" que lleva al CRM. La tarjeta del trabajo queda conectada vía `lead_id`.
 - **Sesión caducada tras subir JWT expiry:** Documentada la causa (migración Legacy JWT → JWT Signing Keys; el gateway de Edge Functions puede rechazar el token). Solución: desplegar con `npx supabase functions deploy run-job-search --no-verify-jwt`. La función sigue validando el JWT con `getUser(jwt)`. Actualizados PASO_A_PASO (0c), SUPABASE_SCHEMA (sección 401/sesión), mensajes de error en `apify.ts` y patrón del botón "Actualizar sesión" en SearchConfigPage.
 - **Eliminación de teams:** Migración `008_remove_teams.sql`: se elimina la tabla `teams` y todas las columnas `team_id` (profiles, leads, scoring_presets, email_templates, scraping_jobs, saved_searches, api_keys). `api_keys` pasa a ser por usuario (`user_id`). RLS simplificado a solo usuario (auth.uid()). Código: tipos sin Team/team_id, getCurrentTeam eliminado, apify/sendgrid/ai-email usan user_id para api_keys, Edge Function sin teamId, UI "Share with Team" → "Share", "Show Team Leads" → "Show shared leads". Ver `docs/TEAM_FLOW.md`.
@@ -29,7 +30,7 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Pendiente de limpieza
 
-- [ ] Corregir errores de TypeScript para que `npm run build` pase (tipos Database/Supabase en hooks y lib, `import.meta.env`, React no usados, etc.) antes del primer deploy a producción.
+- [x] Corregir errores de TypeScript para que `npm run build` pase: hecho (vite-env.d.ts, supabase client any, guards, aserciones).
 - [ ] Revisar imports no usados en componentes.
 - [ ] Unificar clases Tailwind duplicadas (vloom-* vs gray-* residuales).
 - [ ] Verificar que `supabase/migrations/001_initial_schema.sql` existe y está actualizado.

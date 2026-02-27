@@ -2,7 +2,7 @@
 // Leadflow Vloom - Apify Client
 // =====================================================
 import { supabase, supabaseUrl, getCurrentUser } from './supabase';
-import type { ApifyJobResult } from '@/types/database';
+import type { ApiKey, ApifyJobResult } from '@/types/database';
 
 /** Params for running LinkedIn job search (HarvestAPI). From New Search form or saved_searches.input */
 export interface RunLinkedInSearchInput {
@@ -50,10 +50,11 @@ export async function runJobSearchViaEdge(options: {
   savedSearchId?: string;
 }): Promise<RunLinkedInSearchResult> {
   if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
+  const db = supabase;
   const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/run-job-search`;
 
   const getToken = async (): Promise<string> => {
-    const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+    const { data: { session }, error: refreshError } = await db.auth.refreshSession();
     if (refreshError || !session?.user) {
       throw new Error('You must be logged in to run a search. Please sign in again.');
     }
@@ -155,21 +156,16 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
 }> {
   if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
   if (!leadIds.length) return { sent: 0, enriched: 0 };
+  const db = supabase;
 
-  const { error: updateError } = await supabase
-    .from('leads')
-    .update({
-      is_marked_as_lead: true,
-      status: 'backlog',
-      updated_at: new Date().toISOString(),
-    })
-    .in('id', leadIds);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: updateError } = await db.from('leads').update({ is_marked_as_lead: true, status: 'backlog', updated_at: new Date().toISOString() } as any).in('id', leadIds);
 
   if (updateError) throw new Error(updateError.message);
 
   const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/enrich-lead-companies`;
   const getToken = async (): Promise<string> => {
-    const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+    const { data: { session }, error: refreshError } = await db.auth.refreshSession();
     if (refreshError || !session?.user) throw new Error('You must be logged in. Please sign in again.');
     const token = session.access_token;
     if (!token) throw new Error('Session expired. Please sign in again.');
@@ -227,9 +223,10 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
  */
 export async function recomputeLeadScores(leadIds?: string[]): Promise<{ updated: number; total: number }> {
   if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
+  const db = supabase;
   const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/recompute-lead-scores`;
   const getToken = async (): Promise<string> => {
-    const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+    const { data: { session }, error: refreshError } = await db.auth.refreshSession();
     if (refreshError || !session?.user) throw new Error('You must be logged in. Please sign in again.');
     const token = session.access_token;
     if (!token) throw new Error('Session expired. Please sign in again.');
@@ -613,7 +610,7 @@ export async function createApifyClient(): Promise<ApifyClient> {
   const user = await getCurrentUser();
   if (!user || !supabase) throw new Error('You must be logged in.');
 
-  const { data: apiKey } = await supabase
+  const { data } = await supabase
     .from('api_keys')
     .select('api_key_encrypted')
     .eq('user_id', user.id)
@@ -621,6 +618,7 @@ export async function createApifyClient(): Promise<ApifyClient> {
     .eq('is_active', true)
     .single();
 
+  const apiKey = data as ApiKey | null;
   if (!apiKey) {
     throw new Error('Apify API key not configured. Please add it in Settings.');
   }
@@ -630,6 +628,7 @@ export async function createApifyClient(): Promise<ApifyClient> {
 
 /** Job URLs already present for this user (to avoid re-importing / re-enriching). */
 export async function getExistingJobUrls(userId: string): Promise<Set<string>> {
+  if (!supabase) return new Set();
   const { data, error } = await supabase
     .from('leads')
     .select('job_url')
@@ -640,7 +639,7 @@ export async function getExistingJobUrls(userId: string): Promise<Set<string>> {
     console.error('Error fetching existing job URLs:', error);
     return new Set();
   }
-  const urls = (data ?? [])
+  const urls = ((data ?? []) as { job_url: string | null }[])
     .map((r) => r.job_url as string)
     .filter((u): u is string => typeof u === 'string' && u.length > 0);
   return new Set(urls);
@@ -655,6 +654,7 @@ export async function saveJobsAsLeads(
   scrapingJobId: string,
   userId: string
 ): Promise<{ imported: number; skipped: number }> {
+  if (!supabase) throw new Error('Supabase not configured.');
   const existingUrls = await getExistingJobUrls(userId);
   const newJobs = jobs.filter((j) => j.url && !existingUrls.has(j.url));
 
@@ -696,34 +696,21 @@ export async function saveJobsAsLeads(
   });
 
   if (leads.length === 0) {
-    await supabase
-      .from('scraping_jobs')
-      .update({
-        leads_found: jobs.length,
-        leads_imported: 0,
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', scrapingJobId);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await supabase.from('scraping_jobs').update({ leads_found: jobs.length, leads_imported: 0, status: 'completed', completed_at: new Date().toISOString() } as any).eq('id', scrapingJobId);
     return { imported: 0, skipped: jobs.length };
   }
 
-  const { data, error } = await supabase.from('leads').insert(leads).select('id');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await supabase.from('leads').insert(leads as any).select('id');
 
   if (error) {
     console.error('Error saving leads:', error);
     throw error;
   }
 
-  await supabase
-    .from('scraping_jobs')
-    .update({
-      leads_found: jobs.length,
-      leads_imported: data?.length ?? 0,
-      status: 'completed',
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', scrapingJobId);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await supabase.from('scraping_jobs').update({ leads_found: jobs.length, leads_imported: (data as { id: string }[] | null)?.length ?? 0, status: 'completed', completed_at: new Date().toISOString() } as any).eq('id', scrapingJobId);
 
   return { imported: data?.length ?? 0, skipped: jobs.length - (data?.length ?? 0) };
 }
@@ -778,6 +765,7 @@ export async function runLinkedInJobSearch(options: {
   input: RunLinkedInSearchInput | Record<string, unknown>;
   savedSearchId?: string;
 }): Promise<RunLinkedInSearchResult> {
+  if (!supabase) throw new Error('Supabase not configured.');
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('You must be logged in to run a search.');
 
@@ -814,15 +802,14 @@ export async function runLinkedInJobSearch(options: {
       error_message: null,
       started_at: new Date().toISOString(),
       completed_at: null,
-    })
-    .select('id')
-    .single();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any).select('id').single();
 
   if (insertError || !jobRow) {
     throw new Error(insertError?.message ?? 'Failed to create scraping job.');
   }
 
-  const scrapingJobId = jobRow.id;
+  const scrapingJobId = (jobRow as { id: string }).id;
 
   try {
     const client = await createApifyClient();
@@ -836,26 +823,27 @@ export async function runLinkedInJobSearch(options: {
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await supabase
-      .from('scraping_jobs')
-      .update({
-        status: 'failed',
-        error_message: message,
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', scrapingJobId);
+    if (supabase) {
+      await supabase
+        .from('scraping_jobs')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update({ status: 'failed', error_message: message, completed_at: new Date().toISOString() } as any)
+        .eq('id', scrapingJobId);
+    }
     throw err;
   }
 }
 
 async function loadSavedSearchInput(savedSearchId: string): Promise<Record<string, unknown>> {
+  if (!supabase) throw new Error('Supabase not configured.');
   const { data, error } = await supabase
     .from('saved_searches')
     .select('input')
     .eq('id', savedSearchId)
     .single();
-  if (error || !data?.input) {
+  const row = data as { input: unknown } | null;
+  if (error || !row?.input) {
     throw new Error('Saved search not found or has no input.');
   }
-  return (data.input as Record<string, unknown>) ?? {};
+  return (row.input as Record<string, unknown>) ?? {};
 }

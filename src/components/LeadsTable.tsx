@@ -402,10 +402,10 @@ export function LeadsTable({
 
   const handleSort = (column: TableColumn) => {
     if (!column.sortable) return;
-    
+    const key = column.key as keyof Lead;
     onSortChange({
-      column: column.key,
-      direction: sort.column === column.key && sort.direction === 'asc' ? 'desc' : 'asc',
+      column: key,
+      direction: sort.column === key && sort.direction === 'asc' ? 'desc' : 'asc',
     });
   };
 

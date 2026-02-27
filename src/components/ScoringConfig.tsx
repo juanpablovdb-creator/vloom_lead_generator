@@ -1,7 +1,7 @@
 // =====================================================
 // Leadflow Vloom - ScoringConfig Component
 // =====================================================
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Sliders,
   Save,

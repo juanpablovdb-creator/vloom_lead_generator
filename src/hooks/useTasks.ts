@@ -63,10 +63,8 @@ export function useTasks(): UseTasksReturn {
 
   const updateTaskStatus = useCallback(async (id: string, status: TaskStatus) => {
     if (!supabase) return;
-    const { error: updateError } = await supabase
-      .from('tasks')
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq('id', id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: updateError } = await supabase.from('tasks').update({ status, updated_at: new Date().toISOString() } as any).eq('id', id);
 
     if (updateError) throw updateError;
     setTasks(prev => prev.map(t => (t.id === id ? { ...t, status, updated_at: new Date().toISOString() } as TaskWithLead : t)));

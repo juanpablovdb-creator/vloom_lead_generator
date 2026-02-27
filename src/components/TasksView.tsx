@@ -318,7 +318,7 @@ function TasksTodoView({
   onStatusChange,
   onDelete,
   onNavigateToLead,
-  onRefresh,
+  onRefresh: _onRefresh,
 }: {
   pendingTasks: TaskWithLead[];
   doneTasks: TaskWithLead[];
@@ -404,7 +404,7 @@ function TasksTodoView({
 
 function TodoTaskRow({
   task,
-  isDoneView,
+  isDoneView: _isDoneView,
   onToggleDone,
   onDelete,
   onNavigateToLead,

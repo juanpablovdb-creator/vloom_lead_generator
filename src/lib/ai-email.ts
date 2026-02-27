@@ -2,7 +2,7 @@
 // Leadflow Vloom - AI Email Generator (Claude API)
 // =====================================================
 import { supabase, getCurrentUser } from './supabase';
-import type { Lead, EmailTemplate } from '@/types/database';
+import type { ApiKey, Lead, EmailTemplate } from '@/types/database';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
@@ -252,11 +252,12 @@ export async function createAIEmailGenerator(): Promise<AIEmailGenerator> {
     .eq('is_active', true)
     .single();
 
-  if (!apiKey) {
+  const row = apiKey as ApiKey | null;
+  if (!row) {
     throw new Error('Anthropic API key not configured. Please add it in Settings.');
   }
 
-  return new AIEmailGenerator(apiKey.api_key_encrypted);
+  return new AIEmailGenerator(row.api_key_encrypted);
 }
 
 // Helper para generar email para un lead específico
@@ -273,6 +274,7 @@ export async function generateEmailForLead(
 ): Promise<GeneratedEmail> {
   const generator = await createAIEmailGenerator();
 
+  if (!supabase) throw new Error('Supabase not configured.');
   let template: EmailTemplate | undefined;
   if (options.templateId) {
     const { data } = await supabase
