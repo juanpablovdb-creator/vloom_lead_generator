@@ -4,10 +4,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Task, TaskStatus } from '@/types/database';
+import type { LeadStatus } from '@/types/database';
 
-/** Task with lead's job_url for the "View job" link */
+/** Task with lead data for table columns (company, contact, CRM status) */
 export interface TaskWithLead extends Task {
-  leads: { job_url: string | null } | null;
+  leads: {
+    job_url: string | null;
+    company_name: string | null;
+    contact_name: string | null;
+    status: LeadStatus | null;
+  } | null;
 }
 
 interface UseTasksReturn {
@@ -16,11 +22,13 @@ interface UseTasksReturn {
   error: string | null;
   refreshTasks: () => Promise<void>;
   updateTaskStatus: (id: string, status: TaskStatus) => Promise<void>;
+  updateTaskTitle: (id: string, title: string) => Promise<void>;
+  createTask: (leadId: string, title: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
 }
 
 /**
- * Returns tasks for the current user (e.g. "Contactar a X" linked to leads).
+ * Returns tasks for the current user (e.g. "Contact X" linked to leads).
  * Tasks are created automatically when a user marks a job post as lead.
  */
 export function useTasks(): UseTasksReturn {
@@ -44,7 +52,7 @@ export function useTasks(): UseTasksReturn {
     }
     const { data, error: fetchErr } = await supabase
       .from('tasks')
-      .select('*, leads(job_url)')
+      .select('*, leads(job_url, company_name, contact_name, status)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
@@ -70,6 +78,24 @@ export function useTasks(): UseTasksReturn {
     setTasks(prev => prev.map(t => (t.id === id ? { ...t, status, updated_at: new Date().toISOString() } as TaskWithLead : t)));
   }, []);
 
+  const updateTaskTitle = useCallback(async (id: string, title: string) => {
+    if (!supabase) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: updateError } = await supabase.from('tasks').update({ title, updated_at: new Date().toISOString() } as any).eq('id', id);
+    if (updateError) throw updateError;
+    setTasks(prev => prev.map(t => (t.id === id ? { ...t, title, updated_at: new Date().toISOString() } as TaskWithLead : t)));
+  }, []);
+
+  const createTask = useCallback(async (leadId: string, title: string) => {
+    if (!supabase) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: insertErr } = await supabase.from('tasks').insert({ user_id: user.id, lead_id: leadId, title, status: 'pending' } as any);
+    if (insertErr) throw insertErr;
+    await fetchTasks();
+  }, [fetchTasks]);
+
   const deleteTask = useCallback(async (id: string) => {
     if (!supabase) return;
     const { error: deleteError } = await supabase.from('tasks').delete().eq('id', id);
@@ -83,6 +109,8 @@ export function useTasks(): UseTasksReturn {
     error,
     refreshTasks: fetchTasks,
     updateTaskStatus,
+    updateTaskTitle,
+    createTask,
     deleteTask,
   };
 }

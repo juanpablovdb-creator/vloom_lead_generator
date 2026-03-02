@@ -310,10 +310,10 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
 
     setLeads(prev => prev.map(l => (l.id === id ? { ...l, ...updates } : l)));
 
-    // When user marks a job post as lead, create a task "Contactar a ..." linked to the lead card
+    // When user marks a job post as lead, create a task "Contact ..." linked to the lead card
     if (updates.is_marked_as_lead === true && lead) {
       const contactLabel = [lead.company_name, lead.contact_name].filter(Boolean).join(' – ') || 'lead';
-      const title = `Contactar a ${contactLabel}`;
+      const title = `Contact ${contactLabel}`;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await supabase.from('tasks').insert({ user_id: lead.user_id, lead_id: lead.id, title, status: 'pending' } as any);
     }

@@ -15,6 +15,7 @@ const PIPELINE_STAGES: { id: LeadStatus; label: string }[] = [
   { id: 'negotiation', label: 'Negotiation' },
   { id: 'closed', label: 'Closed' },
   { id: 'lost', label: 'Lost' },
+  { id: 'disqualified', label: 'Disqualified' },
 ];
 
 interface CRMKanbanProps {
@@ -22,9 +23,10 @@ interface CRMKanbanProps {
   isLoading: boolean;
   onStatusChange: (leadId: string, status: LeadStatus) => Promise<void>;
   onMarkAsLead?: (lead: Lead, value: boolean) => void;
+  onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
 }
 
-export function CRMKanban({ leads, isLoading, onStatusChange, onMarkAsLead }: CRMKanbanProps) {
+export function CRMKanban({ leads, isLoading, onStatusChange, onMarkAsLead, onUpdateLead }: CRMKanbanProps) {
   const [draggedLead, setDraggedLead] = useState<Lead | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<LeadStatus | null>(null);
 
@@ -84,7 +86,7 @@ export function CRMKanban({ leads, isLoading, onStatusChange, onMarkAsLead }: CR
 
   return (
     <div
-      className="flex gap-3 overflow-x-auto pb-4 min-h-[320px]"
+      className="flex gap-3 overflow-x-auto pb-4 h-[80vh]"
       onDragEnd={handleDragEnd}
     >
       {PIPELINE_STAGES.map(({ id, label }) => (
@@ -93,7 +95,7 @@ export function CRMKanban({ leads, isLoading, onStatusChange, onMarkAsLead }: CR
           onDragOver={(e) => handleDragOver(e, id)}
           onDragLeave={handleDragLeave}
           onDrop={(e) => handleDrop(e, id)}
-          className={`flex-shrink-0 w-64 min-w-[14rem] rounded-lg border transition-colors ${
+          className={`flex-shrink-0 w-64 min-w-[14rem] h-full flex flex-col rounded-lg border transition-colors ${
             dragOverColumn === id
               ? 'border-vloom-accent bg-vloom-accent/5'
               : 'border-vloom-border bg-vloom-surface/50'
@@ -107,13 +109,14 @@ export function CRMKanban({ leads, isLoading, onStatusChange, onMarkAsLead }: CR
               ({leadsByStatus.get(id)?.length ?? 0})
             </span>
           </div>
-          <div className="p-2 space-y-2 max-h-[280px] overflow-y-auto">
+          <div className="p-2 space-y-2 flex-1 overflow-y-auto">
             {(leadsByStatus.get(id) ?? []).map((lead) => (
               <CRMCard
                 key={lead.id}
                 lead={lead}
                 onDragStart={handleDragStart}
                 onMarkAsLead={onMarkAsLead}
+                onUpdateLead={onUpdateLead}
               />
             ))}
           </div>

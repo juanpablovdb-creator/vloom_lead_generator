@@ -179,6 +179,7 @@ export function CRMView() {
           isLoading={isLoading}
           onStatusChange={updateLeadStatus}
           onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
+          onUpdateLead={(id, updates) => updateLead(id, updates)}
         />
       ) : (
         <LeadsTable

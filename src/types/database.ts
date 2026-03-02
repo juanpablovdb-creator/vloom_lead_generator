@@ -15,7 +15,8 @@ export type LeadStatus =
   | 'positive_reply'
   | 'negotiation'
   | 'closed'
-  | 'lost';
+  | 'lost'
+  | 'disqualified';
 
 export type EmailStatus = 
   | 'draft'
@@ -203,7 +204,7 @@ export interface ApiKey {
   updated_at: string;
 }
 
-/** Task status (e.g. "Contactar a X" linked to a lead when marked as lead). */
+/** Task status (e.g. "Contact X" linked to a lead when marked as lead). */
 export type TaskStatus = 'pending' | 'done' | 'cancelled';
 
 export interface Task {
