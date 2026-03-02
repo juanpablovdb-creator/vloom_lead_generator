@@ -21,12 +21,6 @@ import { useLeads } from '@/hooks/useLeads';
 import type { TaskStatus, LeadStatus } from '@/types/database';
 import type { Lead } from '@/types/database';
 
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  pending: 'Not Started',
-  done: 'Done',
-  cancelled: 'Cancelled',
-};
-
 /** CRM pipeline stage labels for the Status column (lead's column on the board) */
 const CRM_STATUS_LABEL: Record<LeadStatus, string> = {
   backlog: 'Backlog',
@@ -65,15 +59,6 @@ function getStoredTodoFilter(): TodoFilter {
   }
 }
 
-function formatCompletedOn(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString(undefined, { dateStyle: 'medium' });
-  } catch {
-    return '—';
-  }
-}
-
 export interface TasksViewProps {
   onNavigateToLead?: (leadId: string) => void;
 }
@@ -85,7 +70,7 @@ export function TasksView({ onNavigateToLead }: TasksViewProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const { tasks, isLoading, error, updateTaskStatus, updateTaskTitle, createTask, deleteTask, refreshTasks } = useTasks();
-  const { leads } = useLeads({ marked_as_lead_only: true, pageSize: 100 });
+  const { leads } = useLeads({ initialFilters: { marked_as_lead_only: true }, pageSize: 100 });
 
   const setViewModeAndStore = (mode: TasksViewMode) => {
     setViewMode(mode);
@@ -659,38 +644,6 @@ function TaskStatusIcon({
           aria-label="Mark done"
         >
           <Circle className="h-3.5 w-3.5" />
-        </button>
-      )}
-    </span>
-  );
-}
-
-function StatusCell({
-  status: taskStatus,
-  onMarkDone,
-}: {
-  status: TaskStatus;
-  onMarkDone: () => void;
-}) {
-  const label = STATUS_LABEL[taskStatus];
-  const isPending = taskStatus === 'pending';
-  const isDone = taskStatus === 'done';
-
-  return (
-    <span className="inline-flex items-center gap-1.5 text-sm">
-      {isDone ? (
-        <CheckCircle2 className="w-4 h-4 text-green-500" />
-      ) : (
-        <Circle className={`w-4 h-4 ${isPending ? 'text-vloom-muted' : 'text-vloom-muted'}`} />
-      )}
-      <span className={isDone ? 'text-vloom-muted' : ''}>{label}</span>
-      {isPending && (
-        <button
-          type="button"
-          onClick={onMarkDone}
-          className="text-sm text-vloom-accent hover:underline ml-1"
-        >
-          Mark done
         </button>
       )}
     </span>
