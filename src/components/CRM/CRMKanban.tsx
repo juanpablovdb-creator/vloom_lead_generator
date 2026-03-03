@@ -24,9 +24,17 @@ interface CRMKanbanProps {
   onStatusChange: (leadId: string, status: LeadStatus) => Promise<void>;
   onMarkAsLead?: (lead: Lead, value: boolean) => void;
   onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
+  onOpenLead?: (lead: Lead) => void;
 }
 
-export function CRMKanban({ leads, isLoading, onStatusChange, onMarkAsLead, onUpdateLead }: CRMKanbanProps) {
+export function CRMKanban({
+  leads,
+  isLoading,
+  onStatusChange,
+  onMarkAsLead,
+  onUpdateLead,
+  onOpenLead,
+}: CRMKanbanProps) {
   const [draggedLead, setDraggedLead] = useState<Lead | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<LeadStatus | null>(null);
 
@@ -117,6 +125,7 @@ export function CRMKanban({ leads, isLoading, onStatusChange, onMarkAsLead, onUp
                 onDragStart={handleDragStart}
                 onMarkAsLead={onMarkAsLead}
                 onUpdateLead={onUpdateLead}
+                onOpen={onOpenLead}
               />
             ))}
           </div>

@@ -1,10 +1,9 @@
 // =====================================================
 // Leadflow Vloom - Tasks view (two views: Table + Todo list)
 // =====================================================
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   CheckSquare,
-  ExternalLink,
   Loader2,
   LayoutGrid,
   List,
@@ -12,14 +11,16 @@ import {
   CheckCircle2,
   Search,
   Building2,
-  Settings2,
   X,
   Plus,
+  Settings2,
 } from 'lucide-react';
 import { useTasks, type TaskWithLead } from '@/hooks/useTasks';
 import { useLeads } from '@/hooks/useLeads';
+import { supabase } from '@/lib/supabase';
 import type { TaskStatus, LeadStatus } from '@/types/database';
 import type { Lead } from '@/types/database';
+import { LeadCardPopup } from '@/components/CRM/LeadCardPopup';
 
 /** CRM pipeline stage labels for the Status column (lead's column on the board) */
 const CRM_STATUS_LABEL: Record<LeadStatus, string> = {
@@ -63,14 +64,52 @@ export interface TasksViewProps {
   onNavigateToLead?: (leadId: string) => void;
 }
 
-export function TasksView({ onNavigateToLead }: TasksViewProps) {
+export function TasksView({ onNavigateToLead: _onNavigateToLead }: TasksViewProps) {
   const [viewMode, setViewMode] = useState<TasksViewMode>(getStoredViewMode);
   const [todoFilter, setTodoFilter] = useState<TodoFilter>(getStoredTodoFilter);
   const [tableSearch, setTableSearch] = useState('');
-  const [panelOpen, setPanelOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createTitle, setCreateTitle] = useState('');
+  const [createLeadId, setCreateLeadId] = useState('');
+  const [createSaving, setCreateSaving] = useState(false);
   const { tasks, isLoading, error, updateTaskStatus, updateTaskTitle, createTask, deleteTask, refreshTasks } = useTasks();
-  const { leads } = useLeads({ initialFilters: { marked_as_lead_only: true }, pageSize: 100 });
+  const { leads, updateLead, updateLeadStatus } = useLeads({ initialFilters: { marked_as_lead_only: true }, pageSize: 100 });
+
+  const openTaskPopup = useCallback((task: TaskWithLead | null) => {
+    setSelectedTaskId(task?.id ?? null);
+    setSelectedLead(null);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTaskId || !supabase) {
+      setSelectedLead(null);
+      return;
+    }
+    const task = tasks.find((t) => t.id === selectedTaskId);
+    if (!task) {
+      setSelectedLead(null);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from('leads')
+      .select('*')
+      .eq('id', task.lead_id)
+      .single()
+      .then(({ data, error: err }) => {
+        if (cancelled) return;
+        if (err || !data) {
+          setSelectedLead(null);
+          return;
+        }
+        setSelectedLead(data as Lead);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTaskId, tasks]);
 
   const setViewModeAndStore = (mode: TasksViewMode) => {
     setViewMode(mode);
@@ -116,19 +155,31 @@ export function TasksView({ onNavigateToLead }: TasksViewProps) {
   const pendingTasks = tasks.filter((t) => t.status === 'pending');
   const doneTasks = tasks.filter((t) => t.status === 'done' || t.status === 'cancelled');
 
-  const openPanelForTask = (taskId: string | null) => {
-    setSelectedTaskId(taskId);
-    setPanelOpen(true);
-  };
-  const closePanel = () => {
-    setPanelOpen(false);
+  const closePopup = () => {
     setSelectedTaskId(null);
+    setSelectedLead(null);
   };
 
+  const handleCreateTask = async () => {
+    const leadId = createLeadId || leads[0]?.id;
+    const title = createTitle.trim() || `Contact ${leads.find((l) => l.id === leadId)?.company_name || 'lead'}`;
+    if (!leadId) return;
+    setCreateSaving(true);
+    try {
+      await createTask(leadId, title);
+      setShowCreateModal(false);
+      setCreateTitle('');
+      setCreateLeadId(leads[0]?.id ?? '');
+    } finally {
+      setCreateSaving(false);
+    }
+  };
+
+  const selectedTask = selectedTaskId ? tasks.find((t) => t.id === selectedTaskId) ?? null : null;
+
   return (
-    <div className="p-4 md:p-6 flex gap-4 relative">
-      <div className={`flex-1 min-w-0 ${viewMode === 'table' && panelOpen ? 'mr-[420px]' : ''}`}>
-        {/* View switcher */}
+    <div className="p-4 md:p-6 flex flex-col gap-4">
+      <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2 mb-4">
           <div className="flex items-center gap-2">
             <button
@@ -156,16 +207,18 @@ export function TasksView({ onNavigateToLead }: TasksViewProps) {
               Todo
             </button>
           </div>
-          {viewMode === 'table' && (
-            <button
-              type="button"
-              onClick={() => openPanelForTask(null)}
-              className="inline-flex items-center gap-2 rounded-md bg-vloom-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-vloom-accent/90"
-            >
-              <Plus className="w-4 h-4" />
-              Create task
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              setShowCreateModal(true);
+              setCreateLeadId(leads[0]?.id ?? '');
+              setCreateTitle('');
+            }}
+            className="inline-flex items-center gap-2 rounded-md bg-vloom-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-vloom-accent/90"
+          >
+            <Plus className="w-4 h-4" />
+            Create task
+          </button>
         </div>
 
         {viewMode === 'table' ? (
@@ -175,40 +228,91 @@ export function TasksView({ onNavigateToLead }: TasksViewProps) {
             onSearchChange={setTableSearch}
             onStatusChange={updateTaskStatus}
             onDelete={deleteTask}
-            onNavigateToLead={onNavigateToLead}
             onRefresh={refreshTasks}
-            onOpenTask={openPanelForTask}
-            onCreateTaskClick={() => openPanelForTask(null)}
+            onOpenTask={(task) => openTaskPopup(task)}
+            onCreateTaskClick={() => setShowCreateModal(true)}
           />
         ) : (
           <TasksTodoView
-          pendingTasks={pendingTasks}
-          doneTasks={doneTasks}
-          todoFilter={todoFilter}
-          onTodoFilterChange={setTodoFilterAndStore}
-          onStatusChange={updateTaskStatus}
-          onDelete={deleteTask}
-          onNavigateToLead={onNavigateToLead}
-          onRefresh={refreshTasks}
-        />
+            pendingTasks={pendingTasks}
+            doneTasks={doneTasks}
+            todoFilter={todoFilter}
+            onTodoFilterChange={setTodoFilterAndStore}
+            onStatusChange={updateTaskStatus}
+            onDelete={deleteTask}
+            onRefresh={refreshTasks}
+            onOpenTask={(task) => openTaskPopup(task)}
+          />
         )}
       </div>
 
-      {/* Right-hand task details panel (view/edit or create) */}
-      {viewMode === 'table' && (
-        <TaskDetailsPanel
-          isOpen={panelOpen}
-          taskId={selectedTaskId}
-          tasks={tasks}
-          leads={leads}
-          onClose={closePanel}
-          onSaveTitle={updateTaskTitle}
-          onSaveStatus={updateTaskStatus}
-          onCreate={createTask}
-          onDelete={deleteTask}
-          onSaved={refreshTasks}
-          onNavigateToLead={onNavigateToLead}
+      {selectedLead && selectedTask && (
+        <LeadCardPopup
+          lead={selectedLead}
+          currentTask={selectedTask}
+          tasksForLead={tasks.filter((t) => t.lead_id === selectedLead.id)}
+          onClose={closePopup}
+          onUpdateLead={(id, updates) => updateLead(id, updates)}
+          onUpdateLeadStatus={updateLeadStatus}
+          onUpdateTaskStatus={updateTaskStatus}
+          onUpdateTaskTitle={updateTaskTitle}
+          onDeleteTask={deleteTask}
+          onRefreshTasks={refreshTasks}
         />
+      )}
+
+      {showCreateModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60" onClick={() => setShowCreateModal(false)}>
+          <div
+            className="w-full max-w-md bg-vloom-surface rounded-xl border border-vloom-border p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-vloom-text mb-3">New task</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Lead</label>
+                <select
+                  value={createLeadId}
+                  onChange={(e) => setCreateLeadId(e.target.value)}
+                  className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+                >
+                  {leads.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.company_name || l.contact_name || l.id.slice(0, 8)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Title</label>
+                <input
+                  type="text"
+                  value={createTitle}
+                  onChange={(e) => setCreateTitle(e.target.value)}
+                  placeholder="E.g. Contact company"
+                  className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                type="button"
+                onClick={handleCreateTask}
+                disabled={createSaving || !createLeadId || leads.length === 0}
+                className="rounded-md bg-vloom-accent px-4 py-2 text-sm font-medium text-white hover:bg-vloom-accent/90 disabled:opacity-50"
+              >
+                {createSaving ? 'Creating…' : 'Create'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                className="rounded-md border border-vloom-border px-4 py-2 text-sm text-vloom-text"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -221,7 +325,6 @@ function TasksTableView({
   onSearchChange,
   onStatusChange,
   onDelete,
-  onNavigateToLead,
   onRefresh,
   onOpenTask,
   onCreateTaskClick,
@@ -231,9 +334,8 @@ function TasksTableView({
   onSearchChange: (value: string) => void;
   onStatusChange: (id: string, status: TaskStatus) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
-  onNavigateToLead?: (leadId: string) => void;
   onRefresh: () => Promise<void>;
-  onOpenTask: (taskId: string) => void;
+  onOpenTask: (task: TaskWithLead) => void;
   onCreateTaskClick: () => void;
 }) {
   const q = searchTerm.trim().toLowerCase();
@@ -317,7 +419,7 @@ function TasksTableView({
                       <td className="px-3 py-3">
                         <button
                           type="button"
-                          onClick={() => onOpenTask(task.id)}
+                          onClick={() => onOpenTask(task)}
                           className="text-vloom-accent hover:underline font-medium text-left"
                         >
                           {task.title}
@@ -340,25 +442,13 @@ function TasksTableView({
                         {crmLabel}
                       </td>
                       <td className="px-3 py-3">
-                        <div className="flex items-center gap-1">
-                          {onNavigateToLead && (
-                            <button
-                              type="button"
-                              onClick={() => onNavigateToLead(task.lead_id)}
-                              className="p-1.5 rounded text-vloom-muted hover:text-vloom-accent"
-                              title="View lead"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => onDelete(task.id)}
-                            className="text-xs text-vloom-muted hover:text-vloom-error"
-                          >
-                            Delete
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onDelete(task.id)}
+                          className="text-xs text-vloom-muted hover:text-vloom-error"
+                        >
+                          Delete
+                        </button>
                       </td>
                     </tr>
                   );
@@ -386,235 +476,6 @@ function TasksTableView({
         </button>
       </div>
     </>
-  );
-}
-
-/** Right-hand slide-out panel: view/edit task or create new */
-function TaskDetailsPanel({
-  isOpen,
-  taskId,
-  tasks,
-  leads,
-  onClose,
-  onSaveTitle,
-  onSaveStatus,
-  onCreate,
-  onDelete,
-  onSaved,
-  onNavigateToLead,
-}: {
-  isOpen: boolean;
-  taskId: string | null;
-  tasks: TaskWithLead[];
-  leads: Lead[];
-  onClose: () => void;
-  onSaveTitle: (id: string, title: string) => Promise<void>;
-  onSaveStatus: (id: string, status: TaskStatus) => Promise<void>;
-  onCreate: (leadId: string, title: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-  onSaved: () => Promise<void>;
-  onNavigateToLead?: (leadId: string) => void;
-}) {
-  const task = taskId ? tasks.find((t) => t.id === taskId) ?? null : null;
-  const isCreate = taskId === null;
-  const [title, setTitle] = useState('');
-  const [taskStatus, setTaskStatus] = useState<TaskStatus>('pending');
-  const [createLeadId, setCreateLeadId] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    if (task) {
-      setTitle(task.title);
-      setTaskStatus(task.status);
-    } else {
-      setTitle('');
-      setTaskStatus('pending');
-      if (leads.length > 0) setCreateLeadId(leads[0].id);
-    }
-  }, [isOpen, task?.id, task?.title, task?.status, leads]);
-
-  if (!isOpen) return null;
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      if (isCreate) {
-        await onCreate(createLeadId, title.trim() || 'New task');
-        await onSaved();
-        onClose();
-      } else if (taskId) {
-        await onSaveTitle(taskId, title.trim() || (task?.title ?? ''));
-        if (taskStatus !== task?.status) await onSaveStatus(taskId, taskStatus);
-        await onSaved();
-        onClose();
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!taskId) return;
-    if (!confirm('Delete this task?')) return;
-    setSaving(true);
-    try {
-      await onDelete(taskId);
-      await onSaved();
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const leadStatus = task?.leads?.status ?? 'backlog';
-  const crmLabel = CRM_STATUS_LABEL[leadStatus];
-
-  return (
-    <div
-      className="fixed top-0 right-0 z-30 h-full w-full max-w-[420px] bg-vloom-surface border-l border-vloom-border shadow-xl flex flex-col"
-      style={{ marginTop: 0 }}
-    >
-      <div className="flex items-center justify-between p-4 border-b border-vloom-border">
-        <h2 className="text-lg font-semibold text-vloom-text">
-          {isCreate ? 'Create task' : 'Task details'}
-        </h2>
-        <button
-          type="button"
-          onClick={onClose}
-          className="p-2 rounded-md text-vloom-muted hover:text-vloom-text hover:bg-vloom-border/30"
-          aria-label="Close"
-        >
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        <div>
-          <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-            Task title
-          </label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
-            placeholder="E.g. Follow up with contact"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-            Task type
-          </label>
-          <div className="text-sm text-vloom-muted">To-do</div>
-        </div>
-
-        {isCreate ? (
-          <div>
-            <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-              Associate with lead
-            </label>
-            {leads.length === 0 ? (
-              <p className="text-sm text-vloom-muted">No leads. Mark leads in CRM first.</p>
-            ) : (
-              <select
-                value={createLeadId}
-                onChange={(e) => setCreateLeadId(e.target.value)}
-                className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
-              >
-                {leads.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.company_name || l.contact_name || l.id.slice(0, 8)}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        ) : (
-          <>
-            <div>
-              <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-                Associate with records
-              </label>
-              <div className="text-sm text-vloom-text">
-                {task?.leads?.company_name || task?.leads?.contact_name || '--'}
-                {onNavigateToLead && task && (
-                  <button
-                    type="button"
-                    onClick={() => onNavigateToLead(task.lead_id)}
-                    className="ml-2 text-vloom-accent hover:underline"
-                  >
-                    View lead
-                  </button>
-                )}
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-                CRM status (lead column)
-              </label>
-              <div className="text-sm text-vloom-text">{crmLabel}</div>
-            </div>
-          </>
-        )}
-
-        <div>
-          <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-            Task status
-          </label>
-          <select
-            value={taskStatus}
-            onChange={(e) => setTaskStatus(e.target.value as TaskStatus)}
-            className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
-          >
-            <option value="pending">Not started</option>
-            <option value="done">Done</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-            Notes
-          </label>
-          <textarea
-            readOnly
-            value="—"
-            className="w-full rounded-md border border-vloom-border bg-vloom-border/20 px-3 py-2 text-sm text-vloom-muted min-h-[80px]"
-            placeholder="Lead notes (from CRM)"
-          />
-        </div>
-      </div>
-
-      <div className="p-4 border-t border-vloom-border flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || (isCreate && (!createLeadId || leads.length === 0))}
-          className="rounded-md bg-vloom-accent px-4 py-2 text-sm font-medium text-white hover:bg-vloom-accent/90 disabled:opacity-60"
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md border border-vloom-border px-4 py-2 text-sm text-vloom-text hover:bg-vloom-border/30"
-        >
-          Cancel
-        </button>
-        {!isCreate && taskId && (
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={saving}
-            className="rounded-md border border-red-500/50 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-60"
-          >
-            Delete
-          </button>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -650,7 +511,7 @@ function TaskStatusIcon({
   );
 }
 
-// View 2: Todo List – To Do / Done tabs, checklist style
+// View 2: Todo List – same columns as table (Status, Title, Contact, Company, CRM status), click opens popup
 function TasksTodoView({
   pendingTasks,
   doneTasks,
@@ -658,8 +519,8 @@ function TasksTodoView({
   onTodoFilterChange,
   onStatusChange,
   onDelete,
-  onNavigateToLead,
   onRefresh: _onRefresh,
+  onOpenTask,
 }: {
   pendingTasks: TaskWithLead[];
   doneTasks: TaskWithLead[];
@@ -667,8 +528,8 @@ function TasksTodoView({
   onTodoFilterChange: (f: TodoFilter) => void;
   onStatusChange: (id: string, status: TaskStatus) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
-  onNavigateToLead?: (leadId: string) => void;
   onRefresh: () => Promise<void>;
+  onOpenTask: (task: TaskWithLead) => void;
 }) {
   const displayTasks = todoFilter === 'todo' ? pendingTasks : doneTasks;
 
@@ -676,7 +537,7 @@ function TasksTodoView({
     <>
       <div className="mb-2">
         <h1 className="text-base font-semibold text-vloom-text">Todo List</h1>
-        <p className="text-sm text-vloom-muted mt-0.5">Stay organized with tasks, your way.</p>
+        <p className="text-sm text-vloom-muted mt-0.5">Same info as table. Click a row to open the lead card.</p>
       </div>
 
       <div className="flex items-center gap-2 mb-4">
@@ -717,94 +578,89 @@ function TasksTodoView({
           {todoFilter === 'todo' ? 'No tasks to do.' : 'No completed tasks.'}
         </div>
       ) : (
-        <ul className="space-y-1">
-          {displayTasks.map((task) => (
-            <TodoTaskRow
-              key={task.id}
-              task={task}
-              isDoneView={todoFilter === 'done'}
-              onToggleDone={() => onStatusChange(task.id, task.status === 'pending' ? 'done' : 'pending')}
-              onDelete={() => onDelete(task.id)}
-              onNavigateToLead={onNavigateToLead}
-            />
-          ))}
-        </ul>
+        <div className="border border-vloom-border rounded-lg overflow-hidden bg-vloom-surface">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-vloom-border/30 border-b border-vloom-border">
+                <tr>
+                  <th className="px-3 py-2 text-xs font-medium text-vloom-muted uppercase tracking-wider">Status</th>
+                  <th className="px-3 py-2 text-xs font-medium text-vloom-muted uppercase tracking-wider">Title</th>
+                  <th className="px-3 py-2 text-xs font-medium text-vloom-muted uppercase tracking-wider">Contact</th>
+                  <th className="px-3 py-2 text-xs font-medium text-vloom-muted uppercase tracking-wider">Company</th>
+                  <th className="px-3 py-2 text-xs font-medium text-vloom-muted uppercase tracking-wider">CRM status</th>
+                  <th className="w-16 px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-vloom-border/50">
+                {displayTasks.map((task) => (
+                  <TodoTaskRow
+                    key={task.id}
+                    task={task}
+                    onToggleDone={() => onStatusChange(task.id, task.status === 'pending' ? 'done' : 'pending')}
+                    onDelete={() => onDelete(task.id)}
+                    onOpen={() => onOpenTask(task)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
-
-      <div className="mt-6">
-        <button
-          type="button"
-          className="text-sm text-vloom-muted hover:text-vloom-accent border border-dashed border-vloom-border rounded-lg px-4 py-2 w-full"
-        >
-          + New task
-        </button>
-      </div>
     </>
   );
 }
 
 function TodoTaskRow({
   task,
-  isDoneView: _isDoneView,
   onToggleDone,
   onDelete,
-  onNavigateToLead,
+  onOpen,
 }: {
   task: TaskWithLead;
-  isDoneView: boolean;
   onToggleDone: () => void;
   onDelete: () => void;
-  onNavigateToLead?: (leadId: string) => void;
+  onOpen: () => void;
 }) {
   const isChecked = task.status === 'done' || task.status === 'cancelled';
-  const jobUrl = task.leads?.job_url;
+  const leadStatus = task.leads?.status ?? 'backlog';
+  const crmLabel = CRM_STATUS_LABEL[leadStatus];
 
   return (
-    <li className="group flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-vloom-surface/50">
-      <button
-        type="button"
-        onClick={onToggleDone}
-        className="flex-shrink-0 mt-0.5 rounded border-2 border-vloom-border w-5 h-5 flex items-center justify-center hover:border-vloom-accent hover:bg-vloom-accent/10"
-        aria-label={isChecked ? 'Mark not done' : 'Mark done'}
-      >
-        {isChecked && <CheckCircle2 className="w-4 h-4 text-vloom-accent" />}
-      </button>
-      <span className="flex-1 min-w-0">
-        <span
-          className={`block text-sm ${isChecked ? 'text-vloom-muted line-through' : 'text-vloom-text'}`}
-        >
+    <tr
+      className="hover:bg-vloom-border/20 cursor-pointer"
+      onClick={onOpen}
+    >
+      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+        <TaskStatusIcon status={task.status} onMarkDone={onToggleDone} />
+      </td>
+      <td className="px-3 py-2">
+        <span className={`font-medium text-vloom-accent hover:underline ${isChecked ? 'text-vloom-muted line-through' : 'text-vloom-text'}`}>
           {task.title}
         </span>
-        {jobUrl && (
-          <a
-            href={jobUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-vloom-accent hover:underline mt-0.5 inline-block"
-          >
-            View job
-          </a>
+      </td>
+      <td className="px-3 py-2 text-vloom-muted">
+        {task.leads?.contact_name?.trim() || '--'}
+      </td>
+      <td className="px-3 py-2 text-vloom-muted">
+        {task.leads?.company_name?.trim() ? (
+          <span className="inline-flex items-center gap-1.5 text-vloom-text">
+            <Building2 className="w-4 h-4 text-vloom-accent/80" />
+            {task.leads.company_name}
+          </span>
+        ) : (
+          '--'
         )}
-      </span>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-        {onNavigateToLead && (
-          <button
-            type="button"
-            onClick={() => onNavigateToLead(task.lead_id)}
-            className="p-1.5 rounded text-vloom-muted hover:text-vloom-accent"
-            title="View card"
-          >
-            <ExternalLink className="w-4 h-4" />
-          </button>
-        )}
+      </td>
+      <td className="px-3 py-2 text-vloom-muted">{crmLabel}</td>
+      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
         <button
           type="button"
           onClick={onDelete}
-          className="text-sm text-vloom-muted hover:text-vloom-error"
+          className="text-xs text-vloom-muted hover:text-vloom-error"
         >
           Delete
         </button>
-      </div>
-    </li>
+      </td>
+    </tr>
   );
 }

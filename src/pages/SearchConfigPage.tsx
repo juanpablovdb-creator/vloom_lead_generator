@@ -239,6 +239,16 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       defaultValue: 'date',
       icon: <Filter className="w-4 h-4" />,
     },
+    {
+      key: 'excludeDomains',
+      label: 'Exclude company domains',
+      type: 'text',
+      placeholder: 'staffingagency.com, anotherdomain.com',
+      required: false,
+      helpText:
+        'Optional. Comma-separated list of company website domains to skip (e.g. staffing or recruiting agencies).',
+      icon: <Briefcase className="w-4 h-4" />,
+    },
   ],
 
   // Legacy: bebity/linkedin-jobs-scraper

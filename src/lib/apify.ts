@@ -170,6 +170,64 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
 
   if (updateError) throw new Error(updateError.message);
 
+  // Auto-create "Contact ..." tasks for newly marked leads so Tasks view stays in sync.
+  // Avoid duplicates by only inserting tasks for leads that don't already have one.
+  try {
+    // Fetch leads we just updated (id, user_id, company/contact for title).
+    const { data: leadsForTasks } = await db
+      .from('leads')
+      .select('id, user_id, company_name, contact_name')
+      .in('id', leadIds);
+
+    const leadsArray = (leadsForTasks ?? []) as {
+      id: string;
+      user_id: string;
+      company_name: string | null;
+      contact_name: string | null;
+    }[];
+
+    if (leadsArray.length > 0) {
+      // Find which leads already have at least one task.
+      const { data: existingTasks } = await db
+        .from('tasks')
+        .select('lead_id')
+        .in(
+          'lead_id',
+          leadsArray.map((l) => l.id)
+        );
+
+      const leadsWithTasks = new Set<string>(
+        ((existingTasks ?? []) as { lead_id: string }[]).map((t) => t.lead_id)
+      );
+
+      const tasksToInsert = leadsArray
+        .filter((lead) => !leadsWithTasks.has(lead.id))
+        .map((lead) => {
+          const contactLabel = [lead.company_name, lead.contact_name].filter(Boolean).join(' – ') || 'lead';
+          const title = `Contact ${contactLabel}`;
+          return {
+            user_id: lead.user_id,
+            lead_id: lead.id,
+            title,
+            status: 'pending' as const,
+          };
+        });
+
+      if (tasksToInsert.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: taskInsertError } = await db
+          .from('tasks')
+          .insert(tasksToInsert as any);
+        if (taskInsertError) {
+          console.error('Error creating tasks for leads:', taskInsertError);
+        }
+      }
+    }
+  } catch (taskErr) {
+    // Non-fatal: enrichment can still succeed even if task creation fails.
+    console.error('Failed to auto-create tasks after Send to leads:', taskErr);
+  }
+
   const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/enrich-lead-companies`;
   const getToken = async (): Promise<string> => {
     const { data: { session }, error: refreshError } = await db.auth.refreshSession();

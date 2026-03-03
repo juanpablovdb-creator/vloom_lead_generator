@@ -11,9 +11,10 @@ interface CRMCardProps {
   onDragStart: (e: React.DragEvent, lead: Lead) => void;
   onMarkAsLead?: (lead: Lead, value: boolean) => void;
   onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
+  onOpen?: (lead: Lead) => void;
 }
 
-export function CRMCard({ lead, onDragStart, onMarkAsLead, onUpdateLead }: CRMCardProps) {
+export function CRMCard({ lead, onDragStart, onMarkAsLead, onUpdateLead, onOpen }: CRMCardProps) {
   const [isNotesOpen, setIsNotesOpen] = useState(false);
   const [notesDraft, setNotesDraft] = useState<string>(lead.notes ?? '');
   const [savingNotes, setSavingNotes] = useState(false);
@@ -33,6 +34,9 @@ export function CRMCard({ lead, onDragStart, onMarkAsLead, onUpdateLead }: CRMCa
     <div
       draggable
       onDragStart={(e) => onDragStart(e, lead)}
+      onClick={() => {
+        if (onOpen) onOpen(lead);
+      }}
       className="bg-vloom-surface border border-vloom-border rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-vloom-accent/40 transition-colors min-h-[120px] flex flex-col gap-1"
     >
       <div className="flex items-start justify-between gap-2">

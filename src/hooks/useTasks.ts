@@ -11,6 +11,9 @@ export interface TaskWithLead extends Task {
   leads: {
     job_url: string | null;
     company_name: string | null;
+    company_linkedin_url: string | null;
+    company_funding: string | null;
+    job_posted_at: string | null;
     contact_name: string | null;
     status: LeadStatus | null;
   } | null;
@@ -52,7 +55,7 @@ export function useTasks(): UseTasksReturn {
     }
     const { data, error: fetchErr } = await supabase
       .from('tasks')
-      .select('*, leads(job_url, company_name, contact_name, status)')
+      .select('*, leads(job_url, company_name, company_linkedin_url, company_funding, job_posted_at, contact_name, status)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 

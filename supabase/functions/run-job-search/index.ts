@@ -24,6 +24,20 @@ interface RequestBody {
   savedSearchId?: string;
 }
 
+function normalizeDomain(raw: string): string {
+  try {
+    const trimmed = raw.trim();
+    if (!trimmed) return "";
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    const url = new URL(withProtocol);
+    const host = url.hostname.toLowerCase();
+    return host.startsWith("www.") ? host.slice(4) : host;
+  } catch {
+    const cleaned = raw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "");
+    return cleaned.split("/")[0];
+  }
+}
+
 interface JobResult {
   title: string;
   company: string;
@@ -66,6 +80,8 @@ function buildSearchParams(input: Record<string, unknown>): Record<string, unkno
     postedLimit: (input.postedLimit as string) ?? "Past Week",
     maxItems: typeof input.maxItems === "number" ? input.maxItems : Number(input.maxItems) || 500,
     sort: (input.sort as string) ?? "date",
+    // Keep raw excludeDomains (string or comma-separated) so we can filter after scraping.
+    excludeDomains: input.excludeDomains ?? input.excludeDomain ?? "",
   };
 }
 
@@ -225,7 +241,14 @@ Deno.serve(async (req: Request) => {
     rawInput = input ?? {};
   }
 
-  const params = buildSearchParams(rawInput) as { jobTitles: string[]; locations: string[]; postedLimit: string; maxItems: number; sort: string };
+  const params = buildSearchParams(rawInput) as {
+    jobTitles: string[];
+    locations: string[];
+    postedLimit: string;
+    maxItems: number;
+    sort: string;
+    excludeDomains?: unknown;
+  };
   if (!params.jobTitles?.length) {
     return new Response(JSON.stringify({ error: "At least one job title is required." }), {
       status: 400,
@@ -413,7 +436,29 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const jobs = normalizeHarvestApiJobs(items);
+    let jobs = normalizeHarvestApiJobs(items);
+
+    // Optional: exclude companies by domain (e.g. staffing agencies).
+    const excludeDomainsRaw = params.excludeDomains;
+    const excludeList = Array.isArray(excludeDomainsRaw)
+      ? (excludeDomainsRaw as unknown[]).map((v) => String(v))
+      : typeof excludeDomainsRaw === "string"
+        ? toArray(excludeDomainsRaw)
+        : [];
+    const normalizedExclude = new Set(
+      excludeList
+        .map((d) => normalizeDomain(d))
+        .filter((d) => d.length > 0),
+    );
+    if (normalizedExclude.size > 0) {
+      jobs = jobs.filter((job) => {
+        const domains: string[] = [];
+        if (job.companyWebsite) domains.push(normalizeDomain(job.companyWebsite));
+        if (job.companyUrl) domains.push(normalizeDomain(job.companyUrl));
+        return !domains.some((d) => normalizedExclude.has(d));
+      });
+    }
+
     const totalFromApify = jobs.length;
     console.log("[run-job-search] apify items", items.length, "normalized", jobs.length);
 

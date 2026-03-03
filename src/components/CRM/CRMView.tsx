@@ -5,11 +5,14 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { LayoutGrid, List } from 'lucide-react';
 import { recomputeLeadScores } from '@/lib/apify';
 import { useLeads } from '@/hooks/useLeads';
+import { useTasks } from '@/hooks/useTasks';
 import { SUPABASE_CONFIG_HINT } from '@/lib/supabase';
 import { getDisplayLeadsForView } from '@/lib/leadViewUtils';
-import type { LeadViewBy } from '@/types/database';
+import type { Lead, LeadViewBy } from '@/types/database';
 import { CRMKanban } from './CRMKanban';
 import { LeadsTable } from '@/components/LeadsTable';
+import { FilterBar } from '@/components/FilterBar';
+import { LeadCardPopup } from './LeadCardPopup';
 
 const CRM_PREFS_KEY = 'leadflow_crm_preferences';
 
@@ -75,6 +78,25 @@ export function CRMView() {
 
   const [viewMode, setViewMode] = useState<CRMViewMode>(() => initialPrefs.viewMode);
   const [recomputingScores, setRecomputingScores] = useState(false);
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const { tasks, updateTaskStatus, updateTaskTitle, deleteTask, createTask, refreshTasks } = useTasks();
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filters.status?.length) count++;
+    if (filters.source?.length) count++;
+    if (filters.company_size?.length) count++;
+    if (filters.industry?.length) count++;
+    if (filters.has_email !== undefined) count++;
+    if (filters.has_linkedin !== undefined) count++;
+    if (filters.score_min !== undefined || filters.score_max !== undefined) count++;
+    if (filters.search) count++;
+    if (filters.tags?.length) count++;
+    if (filters.saved_search_id) count++;
+    if (filters.marked_as_lead_only === true) count++;
+    if (filters.view_by) count++;
+    return count;
+  }, [filters]);
 
   const handleRecomputeScores = useCallback(async () => {
     setRecomputingScores(true);
@@ -173,6 +195,28 @@ export function CRMView() {
         </div>
       </div>
 
+      <div className="mb-4">
+        <FilterBar
+          filters={filters}
+          onFilterChange={updateFilter}
+          onClearFilters={() => {
+            updateFilter('status', undefined);
+            updateFilter('source', undefined);
+            updateFilter('company_size', undefined);
+            updateFilter('industry', undefined);
+            updateFilter('has_email', undefined);
+            updateFilter('has_linkedin', undefined);
+            updateFilter('score_min', undefined);
+            updateFilter('score_max', undefined);
+            updateFilter('search', undefined);
+            updateFilter('tags', undefined);
+            updateFilter('saved_search_id', undefined);
+            updateFilter('marked_as_lead_only', filters.marked_as_lead_only);
+          }}
+          activeFilterCount={activeFilterCount}
+        />
+      </div>
+
       {viewMode === 'kanban' ? (
         <CRMKanban
           leads={displayLeads}
@@ -180,6 +224,7 @@ export function CRMView() {
           onStatusChange={updateLeadStatus}
           onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
           onUpdateLead={(id, updates) => updateLead(id, updates)}
+          onOpenLead={(lead) => setSelectedLead(lead)}
         />
       ) : (
         <LeadsTable
@@ -198,9 +243,24 @@ export function CRMView() {
           onDelete={() => {}}
           onStatusChange={(lead, status) => updateLeadStatus(lead.id, status)}
           onToggleShare={() => {}}
-          onViewDetails={() => {}}
+          onViewDetails={(lead) => setSelectedLead(lead)}
           onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
           groupSizeByLeadId={groupSizeByLeadId}
+        />
+      )}
+
+      {selectedLead && (
+        <LeadCardPopup
+          lead={selectedLead}
+          tasksForLead={tasks.filter((t) => t.lead_id === selectedLead.id)}
+          onClose={() => setSelectedLead(null)}
+          onUpdateLead={(id, updates) => updateLead(id, updates)}
+          onUpdateLeadStatus={updateLeadStatus}
+          onUpdateTaskStatus={updateTaskStatus}
+          onUpdateTaskTitle={updateTaskTitle}
+          onDeleteTask={deleteTask}
+          onCreateTask={createTask}
+          onRefreshTasks={refreshTasks}
         />
       )}
     </div>

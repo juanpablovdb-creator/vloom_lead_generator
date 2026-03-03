@@ -18,6 +18,7 @@ import {
   Filter,
   Search,
   RefreshCw,
+  GripVertical,
 } from 'lucide-react';
 import type { Lead, LeadStatus, LeadSort, TableColumn } from '@/types/database';
 
@@ -53,6 +54,8 @@ const DEFAULT_COLUMNS: TableColumn[] = [
   { key: 'company_industry', label: 'Industry', visible: true, sortable: true },
   { key: 'company_location', label: 'Location', visible: true, sortable: false },
   { key: 'company_url', label: 'Website', visible: true, sortable: false },
+  { key: 'company_linkedin_url', label: 'Company LinkedIn', visible: true, sortable: false },
+  { key: 'company_funding', label: 'Revenue / funding', visible: true, sortable: false },
   { key: 'company_description', label: 'Company description', visible: true, sortable: false },
   { key: 'enrichment_followerCount', label: 'Followers', visible: true, sortable: false },
   { key: 'enrichment_foundedOn', label: 'Founded', visible: true, sortable: false },
@@ -64,6 +67,7 @@ const DEFAULT_COLUMNS: TableColumn[] = [
   { key: 'score', label: 'Score', visible: true, sortable: true },
   { key: 'status', label: 'Status', visible: true, sortable: true },
   { key: 'job_source', label: 'Source', visible: false, sortable: true },
+  { key: 'job_posted_at', label: 'Posted at', visible: true, sortable: true },
   { key: 'last_enriched_at', label: 'Enriched', visible: true, sortable: true },
   { key: 'created_at', label: 'Imported', visible: true, sortable: true },
   { key: 'notes', label: 'Notes', visible: false, sortable: false },
@@ -402,6 +406,47 @@ export function LeadsTable({
     );
   };
 
+  const [draggedColKey, setDraggedColKey] = useState<string | null>(null);
+  const [dropTargetColKey, setDropTargetColKey] = useState<string | null>(null);
+
+  const moveColumnTo = (fromKey: string, toKey: string) => {
+    if (fromKey === toKey) return;
+    setColumns((cols) => {
+      const fromIdx = cols.findIndex((c) => c.key === fromKey);
+      const toIdx = cols.findIndex((c) => c.key === toKey);
+      if (fromIdx === -1 || toIdx === -1) return cols;
+      const next = [...cols];
+      const [col] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, col);
+      return next;
+    });
+  };
+
+  const handleColumnDragStart = (e: React.DragEvent, key: string) => {
+    setDraggedColKey(key);
+    e.dataTransfer.setData('text/plain', key);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleColumnDragOver = (e: React.DragEvent, key: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropTargetColKey(key);
+  };
+
+  const handleColumnDragEnd = () => {
+    setDraggedColKey(null);
+    setDropTargetColKey(null);
+  };
+
+  const handleColumnDrop = (e: React.DragEvent, toKey: string) => {
+    e.preventDefault();
+    const fromKey = e.dataTransfer.getData('text/plain');
+    if (fromKey) moveColumnTo(fromKey, toKey);
+    setDraggedColKey(null);
+    setDropTargetColKey(null);
+  };
+
   const handleSort = (column: TableColumn) => {
     if (!column.sortable) return;
     const key = column.key as keyof Lead;
@@ -668,6 +713,37 @@ export function LeadsTable({
         );
       }
 
+      case 'company_linkedin_url':
+        if (!lead.company_linkedin_url) return <span className="text-sm text-vloom-muted">—</span>;
+        return (
+          <a
+            href={lead.company_linkedin_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-sm text-vloom-accent hover:underline"
+          >
+            <Linkedin className="w-4 h-4" />
+            LinkedIn
+          </a>
+        );
+
+      case 'company_funding':
+        return (
+          <span className="text-sm text-vloom-text truncate max-w-[180px] block">
+            {lead.company_funding || '—'}
+          </span>
+        );
+
+      case 'job_posted_at': {
+        const dateStr = typeof value === 'string' ? value : null;
+        const date = dateStr ? new Date(dateStr) : null;
+        return (
+          <span className="text-sm text-vloom-muted">
+            {date ? date.toLocaleDateString(undefined, { dateStyle: 'short' }) : '—'}
+          </span>
+        );
+      }
+
       default:
         return (
           <span className="text-sm text-vloom-muted truncate max-w-[150px] block">
@@ -710,20 +786,32 @@ export function LeadsTable({
           {showColumnPicker && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowColumnPicker(false)} />
-              <div className="absolute right-0 mt-1 w-48 bg-vloom-surface rounded-lg shadow-lg border border-vloom-border py-2 z-20">
+              <div className="absolute right-0 mt-1 w-56 bg-vloom-surface rounded-lg shadow-lg border border-vloom-border py-2 z-20 max-h-80 overflow-y-auto">
                 {columns.map(col => (
-                  <label
+                  <div
                     key={col.key}
-                    className="flex items-center gap-2 px-3 py-1.5 hover:bg-vloom-border/30 cursor-pointer text-vloom-text"
+                    draggable
+                    onDragStart={(e) => handleColumnDragStart(e, col.key as string)}
+                    onDragOver={(e) => handleColumnDragOver(e, col.key as string)}
+                    onDragLeave={() => setDropTargetColKey(null)}
+                    onDragEnd={handleColumnDragEnd}
+                    onDrop={(e) => handleColumnDrop(e, col.key as string)}
+                    className={`flex items-center gap-2 px-3 py-1.5 hover:bg-vloom-border/30 text-vloom-text cursor-grab active:cursor-grabbing ${
+                      draggedColKey === col.key ? 'opacity-50' : ''
+                    } ${dropTargetColKey === col.key ? 'ring-1 ring-vloom-accent bg-vloom-accent/10' : ''}`}
                   >
+                    <GripVertical className="w-4 h-4 text-vloom-muted flex-shrink-0" aria-label="Drag to reorder" />
                     <input
                       type="checkbox"
                       checked={col.visible}
                       onChange={() => toggleColumn(col.key as string)}
+                      onClick={(e) => e.stopPropagation()}
                       className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent"
                     />
-                    <span className="text-sm">{col.label}</span>
-                  </label>
+                    <span className="flex-1 text-sm cursor-pointer" onClick={() => toggleColumn(col.key as string)}>
+                      {col.label}
+                    </span>
+                  </div>
                 ))}
               </div>
             </>

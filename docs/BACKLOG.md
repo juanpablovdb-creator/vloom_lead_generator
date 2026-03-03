@@ -42,6 +42,8 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Guía de salida a producción (DEPLOY.md + vercel.json + netlify.toml)
 - [x] Build de producción (TypeScript corregido; npm run build pasa)
 - [x] Saved searches: quitar “Save this search” + renombrado inline sin bug de espacio
+- [x] Saved Searches: vista Disqualified + Restore to Backlog (enlace Disqualified / Back to results, mensaje string)
+- [x] CRM: reordenar columnas con drag handle (GripVertical) en lugar de flechas
 
 ---
 

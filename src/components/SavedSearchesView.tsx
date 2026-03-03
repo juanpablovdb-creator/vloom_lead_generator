@@ -28,6 +28,20 @@ function SavedSearchResultsTable({
   searchName: string;
   onBack: () => void;
 }) {
+  const nonDisqualifiedStatuses: ('backlog' | 'not_contacted' | 'invite_sent' | 'connected' | 'reply' | 'positive_reply' | 'negotiation' | 'closed' | 'lost')[] = [
+    'backlog',
+    'not_contacted',
+    'invite_sent',
+    'connected',
+    'reply',
+    'positive_reply',
+    'negotiation',
+    'closed',
+    'lost',
+  ];
+
+  const [showDisqualified, setShowDisqualified] = useState(false);
+
   const {
     leads,
     totalCount,
@@ -40,19 +54,56 @@ function SavedSearchResultsTable({
     refreshLeads,
     updateLead,
     updateLeadStatus,
+    updateFilter,
+    filters,
     selectedIds,
     toggleSelection,
     selectAll,
     clearSelection,
     isAllSelected,
   } = useLeads({
-    initialFilters: { saved_search_id: savedSearchId },
-    pageSize: 25,
+    initialFilters: {
+      saved_search_id: savedSearchId,
+      status: [...nonDisqualifiedStatuses],
+    },
+    pageSize: 500,
   });
 
   const [sending, setSending] = useState(false);
   const [sendMessage, setSendMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [recomputing, setRecomputing] = useState(false);
+
+  const viewingDisqualified = filters.status?.length === 1 && filters.status[0] === 'disqualified';
+
+  const switchToDisqualified = useCallback(() => {
+    setShowDisqualified(true);
+    updateFilter('status', ['disqualified']);
+    clearSelection();
+  }, [updateFilter, clearSelection]);
+
+  const switchToResults = useCallback(() => {
+    setShowDisqualified(false);
+    updateFilter('status', nonDisqualifiedStatuses.length > 0 ? [...nonDisqualifiedStatuses] : undefined);
+    clearSelection();
+  }, [updateFilter, clearSelection]);
+
+  const handleRestoreSelected = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setSendMessage(null);
+    setSending(true);
+    try {
+      await Promise.all(ids.map((id) => updateLeadStatus(id, 'backlog')));
+      clearSelection();
+      refreshLeads();
+      setSendMessage({ type: 'success', text: `${ids.length} lead${ids.length === 1 ? '' : 's'} restored to Backlog.` });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSendMessage({ type: 'error', text: msg });
+    } finally {
+      setSending(false);
+    }
+  }, [selectedIds, clearSelection, refreshLeads, updateLeadStatus]);
 
   const handleRecomputeScores = useCallback(async () => {
     setSendMessage(null);
@@ -94,6 +145,27 @@ function SavedSearchResultsTable({
     }
   }, [selectedIds, clearSelection, refreshLeads]);
 
+  const handleDisqualifySelected = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setSendMessage(null);
+    setSending(true);
+    try {
+      await Promise.all(ids.map((id) => updateLeadStatus(id, 'disqualified')));
+      clearSelection();
+      refreshLeads();
+      setSendMessage({
+        type: 'success',
+        text: `${ids.length} lead${ids.length === 1 ? '' : 's'} marked as Disqualified and removed from this list.`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : (typeof err === 'object' && err != null && 'message' in err ? String((err as { message: unknown }).message) : String(err));
+      setSendMessage({ type: 'error', text: msg });
+    } finally {
+      setSending(false);
+    }
+  }, [selectedIds, clearSelection, refreshLeads, updateLeadStatus]);
+
   const noop = () => {};
 
   if (error) {
@@ -122,7 +194,7 @@ function SavedSearchResultsTable({
           <span className="text-vloom-muted">·</span>
           <h3 className="text-sm font-medium text-vloom-text">Results for “{searchName}” ({totalCount})</h3>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
             onClick={handleRecomputeScores}
@@ -139,27 +211,69 @@ function SavedSearchResultsTable({
           >
             Refresh
           </button>
+          <span className="text-vloom-muted">·</span>
+          {viewingDisqualified ? (
+            <button
+              type="button"
+              onClick={switchToResults}
+              className="text-xs text-vloom-accent hover:underline"
+            >
+              Back to results
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={switchToDisqualified}
+              className="text-xs text-vloom-muted hover:text-vloom-text"
+            >
+              Disqualified
+            </button>
+          )}
         </div>
       </div>
 
-      {selectedIds.size > 0 && (
+      {viewingDisqualified && selectedIds.size > 0 && (
+        <div className="px-3 py-2 border-b border-vloom-border bg-amber-500/10 flex items-center justify-between flex-wrap gap-2">
+          <span className="text-sm font-medium text-vloom-text">{selectedIds.size} selected</span>
+          <button
+            type="button"
+            onClick={handleRestoreSelected}
+            disabled={sending}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vloom-accent text-white text-sm font-medium hover:bg-vloom-accent-hover disabled:opacity-50"
+          >
+            Restore to Backlog
+          </button>
+        </div>
+      )}
+
+      {!viewingDisqualified && selectedIds.size > 0 && (
         <div className="px-3 py-2 border-b border-vloom-border bg-vloom-accent/10 flex items-center justify-between flex-wrap gap-2">
           <span className="text-sm font-medium text-vloom-text">
             {selectedIds.size} selected
           </span>
-          <button
-            type="button"
-            onClick={handleSendToLeads}
-            disabled={sending}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vloom-accent text-white text-sm font-medium hover:bg-vloom-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {sending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
-            Send to leads
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handleSendToLeads}
+              disabled={sending}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vloom-accent text-white text-sm font-medium hover:bg-vloom-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {sending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              Send to leads
+            </button>
+            <button
+              type="button"
+              onClick={handleDisqualifySelected}
+              disabled={sending}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-vloom-border text-sm text-vloom-muted hover:text-vloom-text hover:bg-vloom-border/30 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Mark as Disqualified
+            </button>
+          </div>
         </div>
       )}
 
@@ -171,7 +285,7 @@ function SavedSearchResultsTable({
               : 'bg-red-500/10 text-red-800 dark:text-red-200'
           }`}
         >
-          {sendMessage.text}
+          {typeof sendMessage.text === 'string' ? sendMessage.text : String(sendMessage.text ?? '')}
           <button
             type="button"
             onClick={() => setSendMessage(null)}
@@ -201,19 +315,44 @@ function SavedSearchResultsTable({
         onViewDetails={noop}
         onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
         selectionAction={
-          <button
-            type="button"
-            onClick={handleSendToLeads}
-            disabled={sending}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vloom-accent text-white text-sm font-medium hover:bg-vloom-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {sending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
-            Send to leads
-          </button>
+          selectedIds.size > 0 ? (
+            <div className="flex items-center gap-2">
+              {viewingDisqualified ? (
+                <button
+                  type="button"
+                  onClick={handleRestoreSelected}
+                  disabled={sending}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vloom-accent text-white text-sm font-medium hover:bg-vloom-accent-hover disabled:opacity-50"
+                >
+                  Restore to Backlog
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleSendToLeads}
+                    disabled={sending}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-vloom-accent text-white text-sm font-medium hover:bg-vloom-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {sending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    Send to leads
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDisqualifySelected}
+                    disabled={sending}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border border-vloom-border text-sm text-vloom-muted hover:text-vloom-text hover:bg-vloom-border/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Mark as Disqualified
+                  </button>
+                </>
+              )}
+            </div>
+          ) : undefined
         }
       />
       {totalCount > pagination.pageSize && (
