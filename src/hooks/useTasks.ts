@@ -74,8 +74,7 @@ export function useTasks(): UseTasksReturn {
 
   const updateTaskStatus = useCallback(async (id: string, status: TaskStatus) => {
     if (!supabase) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: updateError } = await supabase.from('tasks').update({ status, updated_at: new Date().toISOString() } as any).eq('id', id);
+    const { error: updateError } = await supabase.from('tasks').update({ status, updated_at: new Date().toISOString() } as never).eq('id', id);
 
     if (updateError) throw updateError;
     setTasks(prev => prev.map(t => (t.id === id ? { ...t, status, updated_at: new Date().toISOString() } as TaskWithLead : t)));
@@ -83,8 +82,7 @@ export function useTasks(): UseTasksReturn {
 
   const updateTaskTitle = useCallback(async (id: string, title: string) => {
     if (!supabase) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: updateError } = await supabase.from('tasks').update({ title, updated_at: new Date().toISOString() } as any).eq('id', id);
+    const { error: updateError } = await supabase.from('tasks').update({ title, updated_at: new Date().toISOString() } as never).eq('id', id);
     if (updateError) throw updateError;
     setTasks(prev => prev.map(t => (t.id === id ? { ...t, title, updated_at: new Date().toISOString() } as TaskWithLead : t)));
   }, []);
@@ -93,8 +91,7 @@ export function useTasks(): UseTasksReturn {
     if (!supabase) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: insertErr } = await supabase.from('tasks').insert({ user_id: user.id, lead_id: leadId, title, status: 'pending' } as any);
+    const { error: insertErr } = await supabase.from('tasks').insert({ user_id: user.id, lead_id: leadId, title, status: 'pending' } as never);
     if (insertErr) throw insertErr;
     await fetchTasks();
   }, [fetchTasks]);

@@ -303,8 +303,8 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     if (!supabase) return;
     const lead = leads.find(l => l.id === id);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: updateError } = await supabase.from('leads').update(updates as any).eq('id', id);
+    // Supabase client infers never for table update; cast to satisfy typecheck (build)
+    const { error: updateError } = await supabase.from('leads').update(updates as never).eq('id', id);
 
     if (updateError) throw updateError;
 
@@ -314,8 +314,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     if (updates.is_marked_as_lead === true && lead) {
       const contactLabel = [lead.company_name, lead.contact_name].filter(Boolean).join(' – ') || 'lead';
       const title = `Contact ${contactLabel}`;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await supabase.from('tasks').insert({ user_id: lead.user_id, lead_id: lead.id, title, status: 'pending' } as any);
+      await supabase.from('tasks').insert({ user_id: lead.user_id, lead_id: lead.id, title, status: 'pending' } as never);
     }
   }, [leads]);
 

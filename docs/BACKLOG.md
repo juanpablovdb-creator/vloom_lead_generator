@@ -26,7 +26,7 @@ Items priorizados, sin fecha asignada.
 - [ ] Fuentes Google Maps, LinkedIn People (coming soon → activas)
 - [ ] Tests unitarios / E2E
 - [ ] CI/CD (lint, build en PR)
-- [ ] Deploy a producción (guía en docs/DEPLOY.md; build TS ya pasa)
+- [x] Deploy a producción (guía en docs/DEPLOY.md; build TS pasa; fix TS Supabase insert/update para Vercel)
 
 ---
 

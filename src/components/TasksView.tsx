@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   Search,
   Building2,
-  X,
   Plus,
   Settings2,
 } from 'lucide-react';

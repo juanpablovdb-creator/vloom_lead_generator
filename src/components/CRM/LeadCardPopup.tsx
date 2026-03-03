@@ -4,7 +4,7 @@
 // Right: Activity timeline.
 // =====================================================
 import { useState, useMemo } from 'react';
-import { X, CheckSquare, ChevronDown, ChevronUp, CheckCircle2, Circle } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, CheckCircle2, Circle } from 'lucide-react';
 import type { Lead, LeadStatus } from '@/types/database';
 import type { TaskWithLead } from '@/hooks/useTasks';
 import type { TaskStatus } from '@/types/database';

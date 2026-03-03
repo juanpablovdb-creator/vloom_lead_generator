@@ -183,8 +183,7 @@ export async function sendEmailToLead(params: {
 
   // Actualizar status del lead
   if (result.status === 'sent') {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await supabase.from('leads').update({ status: 'invite_sent' } as any).eq('id', lead.id);
+    await supabase.from('leads').update({ status: 'invite_sent' } as never).eq('id', lead.id);
   }
 
   return savedEmail as EmailSent;

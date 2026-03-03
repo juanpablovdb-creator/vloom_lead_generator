@@ -8,10 +8,22 @@ import { useLeads } from '@/hooks/useLeads';
 import { LeadsTable } from '@/components/LeadsTable';
 import { runJobSearchViaEdge, sendSelectedToLeadsAndEnrich, recomputeLeadScores } from '@/lib/apify';
 import type { RunLinkedInSearchResult } from '@/lib/apify';
+import type { LeadStatus } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { Send } from 'lucide-react';
 
 const LINKEDIN_ACTOR_ID = 'harvestapi/linkedin-job-search';
+const NON_DISQUALIFIED_STATUSES: LeadStatus[] = [
+  'backlog',
+  'not_contacted',
+  'invite_sent',
+  'connected',
+  'reply',
+  'positive_reply',
+  'negotiation',
+  'closed',
+  'lost',
+] as const;
 
 export interface SavedSearchesViewProps {
   onRunComplete: (result: RunLinkedInSearchResult) => void;
@@ -28,20 +40,6 @@ function SavedSearchResultsTable({
   searchName: string;
   onBack: () => void;
 }) {
-  const nonDisqualifiedStatuses: ('backlog' | 'not_contacted' | 'invite_sent' | 'connected' | 'reply' | 'positive_reply' | 'negotiation' | 'closed' | 'lost')[] = [
-    'backlog',
-    'not_contacted',
-    'invite_sent',
-    'connected',
-    'reply',
-    'positive_reply',
-    'negotiation',
-    'closed',
-    'lost',
-  ];
-
-  const [showDisqualified, setShowDisqualified] = useState(false);
-
   const {
     leads,
     totalCount,
@@ -64,7 +62,7 @@ function SavedSearchResultsTable({
   } = useLeads({
     initialFilters: {
       saved_search_id: savedSearchId,
-      status: [...nonDisqualifiedStatuses],
+      status: [...NON_DISQUALIFIED_STATUSES],
     },
     pageSize: 500,
   });
@@ -76,14 +74,12 @@ function SavedSearchResultsTable({
   const viewingDisqualified = filters.status?.length === 1 && filters.status[0] === 'disqualified';
 
   const switchToDisqualified = useCallback(() => {
-    setShowDisqualified(true);
     updateFilter('status', ['disqualified']);
     clearSelection();
   }, [updateFilter, clearSelection]);
 
   const switchToResults = useCallback(() => {
-    setShowDisqualified(false);
-    updateFilter('status', nonDisqualifiedStatuses.length > 0 ? [...nonDisqualifiedStatuses] : undefined);
+    updateFilter('status', NON_DISQUALIFIED_STATUSES.length > 0 ? [...NON_DISQUALIFIED_STATUSES] : undefined);
     clearSelection();
   }, [updateFilter, clearSelection]);
 

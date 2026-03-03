@@ -46,14 +46,13 @@ export function useSavedSearches() {
       if (!supabase) throw new Error('Supabase not configured');
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('You must be logged in.');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error: err } = await supabase.from('saved_searches').insert({
         user_id: user.id,
         name: params.name,
         actor_id: params.actor_id,
         input: params.input,
         autorun: false,
-      } as any)
+      } as never)
         .select('id')
         .single();
       if (err) throw err;
@@ -75,8 +74,7 @@ export function useSavedSearches() {
   const updateSavedSearch = useCallback(
     async (id: string, updates: { autorun?: boolean; name?: string }) => {
       if (!supabase) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await supabase.from('saved_searches').update(updates as any).eq('id', id);
+      await supabase.from('saved_searches').update(updates as never).eq('id', id);
       await fetchSearches();
     },
     [fetchSearches]

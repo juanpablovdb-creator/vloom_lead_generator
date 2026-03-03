@@ -165,8 +165,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
   if (!leadIds.length) return { sent: 0, enriched: 0 };
   const db = supabase;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: updateError } = await db.from('leads').update({ is_marked_as_lead: true, status: 'backlog', updated_at: new Date().toISOString() } as any).in('id', leadIds);
+  const { error: updateError } = await db.from('leads').update({ is_marked_as_lead: true, status: 'backlog', updated_at: new Date().toISOString() } as never).in('id', leadIds);
 
   if (updateError) throw new Error(updateError.message);
 
@@ -214,10 +213,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
         });
 
       if (tasksToInsert.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error: taskInsertError } = await db
-          .from('tasks')
-          .insert(tasksToInsert as any);
+        const { error: taskInsertError } = await db.from('tasks').insert(tasksToInsert as never);
         if (taskInsertError) {
           console.error('Error creating tasks for leads:', taskInsertError);
         }
@@ -761,21 +757,18 @@ export async function saveJobsAsLeads(
   });
 
   if (leads.length === 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await supabase.from('scraping_jobs').update({ leads_found: jobs.length, leads_imported: 0, status: 'completed', completed_at: new Date().toISOString() } as any).eq('id', scrapingJobId);
+    await supabase.from('scraping_jobs').update({ leads_found: jobs.length, leads_imported: 0, status: 'completed', completed_at: new Date().toISOString() } as never).eq('id', scrapingJobId);
     return { imported: 0, skipped: jobs.length };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await supabase.from('leads').insert(leads as any).select('id');
+  const { data, error } = await supabase.from('leads').insert(leads as never).select('id');
 
   if (error) {
     console.error('Error saving leads:', error);
     throw error;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await supabase.from('scraping_jobs').update({ leads_found: jobs.length, leads_imported: (data as { id: string }[] | null)?.length ?? 0, status: 'completed', completed_at: new Date().toISOString() } as any).eq('id', scrapingJobId);
+  await supabase.from('scraping_jobs').update({ leads_found: jobs.length, leads_imported: (data as { id: string }[] | null)?.length ?? 0, status: 'completed', completed_at: new Date().toISOString() } as never).eq('id', scrapingJobId);
 
   return { imported: data?.length ?? 0, skipped: jobs.length - (data?.length ?? 0) };
 }
@@ -889,11 +882,7 @@ export async function runLinkedInJobSearch(options: {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (supabase) {
-      await supabase
-        .from('scraping_jobs')
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .update({ status: 'failed', error_message: message, completed_at: new Date().toISOString() } as any)
-        .eq('id', scrapingJobId);
+      await supabase.from('scraping_jobs').update({ status: 'failed', error_message: message, completed_at: new Date().toISOString() } as never).eq('id', scrapingJobId);
     }
     throw err;
   }

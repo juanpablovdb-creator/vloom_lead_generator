@@ -624,8 +624,7 @@ export function SearchConfigPage({
     setRenameSaving(true);
     setRenameError(null);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await supabase.from('saved_searches').update({ name } as any).eq('id', id);
+      const { error } = await supabase.from('saved_searches').update({ name } as never).eq('id', id);
       if (error) throw error;
       setResultSavedSearchName(name);
       setRenaming(false);

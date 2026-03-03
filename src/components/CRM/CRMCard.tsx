@@ -212,13 +212,13 @@ export function CRMCard({ lead, onDragStart, onMarkAsLead, onUpdateLead, onOpen 
                   const title = (taskTitle || '').trim() || `Task for ${companyName}`;
                   setSavingTask(true);
                   try {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    // Supabase client infers never for table insert; cast to satisfy typecheck (build)
                     await supabase.from('tasks').insert({
                       user_id: lead.user_id,
                       lead_id: lead.id,
                       title,
                       status: 'pending',
-                    } as any);
+                    } as never);
                     setTaskTitle('');
                     setIsTaskOpen(false);
                   } finally {
