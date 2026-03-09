@@ -59,6 +59,9 @@ Items preparados para la próxima. 40-60% claros.
 
 ## Completado
 
+- [x] CRM: fix drop en columna Disqualified (min-height drop zone)
+- [x] Saved searches: quitar "New saved search" (solo runs desde New Search)
+- [x] Enrichment: no re-enriquecer leads ya enriquecidos (skip por last_enriched_at)
 - [x] Login obligatorio en producción: sin Supabase config en prod → pantalla "Configuración requerida"; con Supabase → AuthPage si no hay usuario.
 - [x] Guía de deploy a producción (docs/DEPLOY.md, Vercel/Netlify, checklist Supabase)
 - [x] Build TS corregido para deploy (vite-env.d.ts, SupabaseClient<any>, guards, aserciones)
