@@ -1,8 +1,8 @@
 // =====================================================
-// Leadflow Vloom - Saved searches list + Run + New saved search + View outputs
+// Leadflow Vloom - Saved searches list + Run + View outputs
 // =====================================================
 import { useState, useCallback } from 'react';
-import { Play, Plus, Loader2, Trash2, ArrowLeft, List, Pencil, Check, X } from 'lucide-react';
+import { Play, Loader2, Trash2, ArrowLeft, List, Pencil, Check, X } from 'lucide-react';
 import { useSavedSearches } from '@/hooks/useSavedSearches';
 import { useLeads } from '@/hooks/useLeads';
 import { LeadsTable } from '@/components/LeadsTable';
@@ -383,20 +383,12 @@ function SavedSearchResultsTable({
 }
 
 export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesViewProps) {
-  const { savedSearches, isLoading, error, createSavedSearch, deleteSavedSearch, updateSavedSearch } =
+  const { savedSearches, isLoading, error, deleteSavedSearch, updateSavedSearch } =
     useSavedSearches();
   const [editingSearchId, setEditingSearchId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [runningId, setRunningId] = useState<string | null>(null);
-  const [showNewForm, setShowNewForm] = useState(false);
   const [viewingSearchId, setViewingSearchId] = useState<string | null>(null);
-  const [newName, setNewName] = useState('');
-  const [newJobTitles, setNewJobTitles] = useState('');
-  const [newLocations, setNewLocations] = useState('');
-  const [newPostedLimit, setNewPostedLimit] = useState<'Past 1 hour' | 'Past 24 hours' | 'Past Week' | 'Past Month'>('Past 1 hour');
-  const [newMaxItems, setNewMaxItems] = useState(500);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
 
   const handleRun = useCallback(
     async (id: string, actorId: string) => {
@@ -412,50 +404,6 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
     },
     [onRunComplete, onRunError]
   );
-
-  const handleCreate = useCallback(async () => {
-    const name = newName.trim();
-    const jobTitles = newJobTitles
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!name || jobTitles.length === 0) {
-      setCreateError('Name and at least one job title are required.');
-      return;
-    }
-    setCreating(true);
-    setCreateError(null);
-    try {
-      await createSavedSearch({
-        name,
-        actor_id: LINKEDIN_ACTOR_ID,
-        input: {
-          jobTitles,
-          locations: newLocations ? newLocations.split(',').map((s) => s.trim()).filter(Boolean) : [],
-          postedLimit: newPostedLimit,
-          maxItems: newMaxItems,
-          sort: 'date',
-        },
-      });
-      setShowNewForm(false);
-      setNewName('');
-      setNewJobTitles('');
-      setNewLocations('');
-      setNewPostedLimit('Past 1 hour');
-      setNewMaxItems(24);
-    } catch (err) {
-      setCreateError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreating(false);
-    }
-  }, [
-    newName,
-    newJobTitles,
-    newLocations,
-    newPostedLimit,
-    newMaxItems,
-    createSavedSearch,
-  ]);
 
   const linkedInSearches = savedSearches.filter((s) => s.actor_id === LINKEDIN_ACTOR_ID);
   const otherSearches = savedSearches.filter((s) => s.actor_id !== LINKEDIN_ACTOR_ID);
@@ -477,80 +425,6 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
         <div className="rounded-lg border border-red-200 bg-red-50 text-red-800 p-4 text-sm mb-4">{error}</div>
       )}
 
-      <div className="mb-4">
-        <button
-          type="button"
-          onClick={() => setShowNewForm((v) => !v)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-border/30 text-sm"
-        >
-          <Plus className="w-4 h-4" />
-          New saved search
-        </button>
-      </div>
-
-      {showNewForm && (
-        <div className="mb-6 p-4 rounded-xl border border-vloom-border bg-vloom-surface space-y-3">
-          <h2 className="text-sm font-medium text-vloom-text">Create saved search</h2>
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="Search name (e.g. Video Editors Daily)"
-            className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg"
-          />
-          <input
-            type="text"
-            value={newJobTitles}
-            onChange={(e) => setNewJobTitles(e.target.value)}
-            placeholder="Job titles, comma-separated"
-            className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg"
-          />
-          <input
-            type="text"
-            value={newLocations}
-            onChange={(e) => setNewLocations(e.target.value)}
-            placeholder="Locations (optional), comma-separated"
-            className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg"
-          />
-          <select
-            value={newPostedLimit}
-            onChange={(e) => setNewPostedLimit(e.target.value as typeof newPostedLimit)}
-            className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg"
-          >
-            <option value="Past 1 hour">Past 1 hour</option>
-            <option value="Past 24 hours">Past 24 hours</option>
-            <option value="Past Week">Past week</option>
-            <option value="Past Month">Past month</option>
-          </select>
-          <input
-            type="number"
-            min={1}
-            max={500}
-            value={newMaxItems}
-            onChange={(e) => setNewMaxItems(Number(e.target.value) || 24)}
-            className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg"
-          />
-          {createError && <p className="text-sm text-red-600">{createError}</p>}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleCreate}
-              disabled={creating}
-              className="px-4 py-2 bg-vloom-accent text-white rounded-lg text-sm hover:bg-vloom-accent-hover disabled:opacity-50"
-            >
-              {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowNewForm(false)}
-              className="px-4 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
       {viewingSearchId ? (
         (() => {
           const viewing = linkedInSearches.find((s) => s.id === viewingSearchId) ?? otherSearches.find((s) => s.id === viewingSearchId);
@@ -570,7 +444,7 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
         </div>
       ) : linkedInSearches.length === 0 && otherSearches.length === 0 ? (
         <div className="bg-vloom-surface border border-vloom-border rounded-lg p-6 text-center text-vloom-muted text-sm">
-          No saved searches yet. Create one above or run a search from New Search and save it for later.
+          No saved searches yet. Run a search from New Search and it will be saved for later.
         </div>
       ) : (
         <ul className="space-y-2">

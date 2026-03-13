@@ -64,24 +64,26 @@ export function CRMKanban({
 
   const handleDragOver = useCallback((e: React.DragEvent, status: LeadStatus) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
     setDragOverColumn(status);
   }, []);
 
-  const handleDragLeave = useCallback(() => {
-    setDragOverColumn(null);
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverColumn(null);
   }, []);
 
   const handleDrop = useCallback(
     async (e: React.DragEvent, newStatus: LeadStatus) => {
       e.preventDefault();
+      e.stopPropagation();
       setDragOverColumn(null);
-      const id = e.dataTransfer.getData('text/plain');
-      if (!id || !draggedLead || draggedLead.status === newStatus) return;
       setDraggedLead(null);
+      const id = e.dataTransfer.getData('text/plain');
+      if (!id) return;
       await onStatusChange(id, newStatus);
     },
-    [draggedLead, onStatusChange]
+    [onStatusChange]
   );
 
   if (isLoading) {
@@ -109,7 +111,7 @@ export function CRMKanban({
               : 'border-vloom-border bg-vloom-surface/50'
           }`}
         >
-          <div className="p-2 border-b border-vloom-border">
+          <div className="p-2 border-b border-vloom-border flex-shrink-0">
             <span className="text-xs font-medium text-vloom-muted uppercase tracking-wide">
               {label}
             </span>
@@ -117,7 +119,12 @@ export function CRMKanban({
               ({leadsByStatus.get(id)?.length ?? 0})
             </span>
           </div>
-          <div className="p-2 space-y-2 flex-1 overflow-y-auto">
+          <div
+            className="p-2 space-y-2 flex-1 overflow-y-auto min-h-[120px]"
+            onDragOver={(e) => handleDragOver(e, id)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, id)}
+          >
             {(leadsByStatus.get(id) ?? []).map((lead) => (
               <CRMCard
                 key={lead.id}

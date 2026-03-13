@@ -29,6 +29,7 @@ interface LeadRow {
   job_description?: string | null;
   notes?: string | null;
   company_funding?: string | null;
+  last_enriched_at: string | null;
 }
 
 function str(v: unknown): string {
@@ -103,7 +104,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: leads, error: fetchError } = await supabase
       .from("leads")
-      .select("id, company_linkedin_url, company_name, job_location, job_description, notes, company_funding")
+      .select("id, company_linkedin_url, company_name, job_location, job_description, notes, company_funding, last_enriched_at")
       .in("id", leadIds);
 
     if (fetchError || !leads?.length) {
@@ -119,6 +120,7 @@ Deno.serve(async (req: Request) => {
     const leadByName = new Map<string, LeadRow>();
 
     for (const lead of leads as LeadRow[]) {
+      if (lead.last_enriched_at) continue;
       const url = str(lead.company_linkedin_url);
       const name = str(lead.company_name);
       if (url && (url.includes("linkedin.com") || !url.startsWith("http"))) {
