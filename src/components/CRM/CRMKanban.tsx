@@ -22,7 +22,6 @@ interface CRMKanbanProps {
   leads: Lead[];
   isLoading: boolean;
   onStatusChange: (leadId: string, status: LeadStatus) => Promise<void>;
-  onMarkAsLead?: (lead: Lead, value: boolean) => void;
   onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
   onOpenLead?: (lead: Lead) => void;
 }
@@ -31,7 +30,6 @@ export function CRMKanban({
   leads,
   isLoading,
   onStatusChange,
-  onMarkAsLead,
   onUpdateLead,
   onOpenLead,
 }: CRMKanbanProps) {
@@ -130,7 +128,6 @@ export function CRMKanban({
                 key={lead.id}
                 lead={lead}
                 onDragStart={handleDragStart}
-                onMarkAsLead={onMarkAsLead}
                 onUpdateLead={onUpdateLead}
                 onOpen={onOpenLead}
               />

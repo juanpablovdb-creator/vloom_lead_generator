@@ -160,6 +160,8 @@ export async function runJobSearchViaEdge(options: {
 export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
   sent: number;
   enriched: number;
+  personaCompaniesProcessed?: number;
+  personaLeadsCreated?: number;
 }> {
   if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
   if (!leadIds.length) return { sent: 0, enriched: 0 };
@@ -263,18 +265,110 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
   }
 
   const text = await response.text();
-  let body: { error?: string; ok?: boolean; enriched?: number; total?: number };
+  let body: { error?: string; ok?: boolean; enriched?: number; total?: number; code?: number; message?: string };
   try {
     body = text ? (JSON.parse(text) as typeof body) : {};
   } catch {
     body = {};
   }
   if (!response.ok) {
-    throw new Error(typeof body?.error === 'string' ? body.error : text || `Enrichment returned ${response.status}`);
+    const isSessionError =
+      response.status === 401 ||
+      body?.code === 401 ||
+      /Invalid JWT|invalid.*jwt|session expired|sign in again/i.test(body?.message ?? body?.error ?? text);
+    if (isSessionError) {
+      throw new Error('Session expired. Please sign in again.');
+    }
+    throw new Error(typeof body?.error === 'string' ? body.error : (typeof body?.message === 'string' ? body.message : text) || `Enrichment returned ${response.status}`);
   }
+
+  // Persona enrichment: find people at each company matching active Personas (harvestapi/linkedin-company-employees)
+  let personaCompaniesProcessed: number | undefined;
+  let personaLeadsCreated: number | undefined;
+  try {
+    const personaUrl = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/enrich-lead-personas`;
+    const personaRes = await fetch(personaUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ leadIds }),
+    });
+    const personaText = await personaRes.text();
+    const personaBody = personaText
+      ? (JSON.parse(personaText) as { ok?: boolean; leadsCreated?: number; companiesProcessed?: number; error?: string })
+      : {};
+    if (personaRes.ok && personaBody?.ok) {
+      personaCompaniesProcessed = personaBody.companiesProcessed ?? 0;
+      personaLeadsCreated = personaBody.leadsCreated ?? 0;
+    } else if (!personaRes.ok && personaBody?.error) {
+      console.warn('Persona enrichment failed (non-blocking):', personaBody.error);
+    }
+  } catch (personaErr) {
+    console.warn('Persona enrichment failed (non-blocking):', personaErr);
+  }
+
   return {
     sent: leadIds.length,
     enriched: body?.enriched ?? 0,
+    personaCompaniesProcessed,
+    personaLeadsCreated,
+  };
+}
+
+/**
+ * Enrich selected leads with people from their companies using active Personas (harvestapi/linkedin-company-employees).
+ * Creates one new lead row per person found (same company, different contact). Call from CRM when user selects leads and clicks "Enrich with personas".
+ */
+export async function enrichLeadsWithPersonas(leadIds: string[]): Promise<{
+  ok: boolean;
+  leadsCreated?: number;
+  companiesProcessed?: number;
+  error?: string;
+}> {
+  if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
+  if (!leadIds.length) return { ok: true, leadsCreated: 0, companiesProcessed: 0 };
+  const db = supabase;
+  const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/enrich-lead-personas`;
+  const getToken = async (): Promise<string> => {
+    const { data: { session }, error: refreshError } = await db.auth.refreshSession();
+    if (refreshError || !session?.user) throw new Error('You must be logged in. Please sign in again.');
+    const token = session.access_token;
+    if (!token) throw new Error('Session expired. Please sign in again.');
+    return token;
+  };
+  let token = await getToken();
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ leadIds }),
+    });
+    if (response.status === 401) {
+      token = await getToken();
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ leadIds }),
+      });
+    }
+  } catch (networkErr) {
+    const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    throw new Error(`Persona enrichment failed. Deploy enrich-lead-personas and set APIFY_API_TOKEN. ${msg}`);
+  }
+  const text = await response.text();
+  let body: { ok?: boolean; leadsCreated?: number; companiesProcessed?: number; error?: string };
+  try {
+    body = text ? (JSON.parse(text) as typeof body) : {};
+  } catch {
+    body = {};
+  }
+  if (!response.ok) {
+    return { ok: false, error: typeof body?.error === 'string' ? body.error : text || `Status ${response.status}` };
+  }
+  return {
+    ok: true,
+    leadsCreated: body?.leadsCreated ?? 0,
+    companiesProcessed: body?.companiesProcessed ?? 0,
   };
 }
 

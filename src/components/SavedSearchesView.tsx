@@ -70,6 +70,22 @@ function SavedSearchResultsTable({
   const [sending, setSending] = useState(false);
   const [sendMessage, setSendMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [recomputing, setRecomputing] = useState(false);
+  const [refreshingSession, setRefreshingSession] = useState(false);
+
+  const isSessionError =
+    sendMessage?.type === 'error' &&
+    /Session expired|sign in again|Invalid JWT|401|unauthorized/i.test(sendMessage.text);
+
+  const handleRefreshSession = useCallback(async () => {
+    if (!supabase) return;
+    setRefreshingSession(true);
+    try {
+      const { error } = await supabase.auth.refreshSession();
+      if (!error) setSendMessage(null);
+    } finally {
+      setRefreshingSession(false);
+    }
+  }, []);
 
   const viewingDisqualified = filters.status?.length === 1 && filters.status[0] === 'disqualified';
 
@@ -124,13 +140,19 @@ function SavedSearchResultsTable({
     setSendMessage(null);
     setSending(true);
     try {
-      const { sent, enriched } = await sendSelectedToLeadsAndEnrich(ids);
+      const { sent, enriched, personaCompaniesProcessed, personaLeadsCreated } = await sendSelectedToLeadsAndEnrich(ids);
       clearSelection();
       refreshLeads();
-      setSendMessage({
-        type: 'success',
-        text: `${sent} sent to Leads. ${enriched} compan${enriched === 1 ? 'y' : 'ies'} enriched with LinkedIn data.`,
-      });
+      const parts = [`${sent} sent to Leads.`, `${enriched} compan${enriched === 1 ? 'y' : 'ies'} enriched with LinkedIn data.`];
+      if (personaCompaniesProcessed != null && personaCompaniesProcessed > 0) {
+        parts.push(
+          `Persona enrichment ran for ${personaCompaniesProcessed} compan${personaCompaniesProcessed === 1 ? 'y' : 'ies'}.`
+        );
+        if (personaLeadsCreated != null && personaLeadsCreated > 0) {
+          parts.push(`${personaLeadsCreated} new contact${personaLeadsCreated === 1 ? '' : 's'} added.`);
+        }
+      }
+      setSendMessage({ type: 'success', text: parts.join(' ') });
     } catch (err) {
       setSendMessage({
         type: 'error',
@@ -275,20 +297,46 @@ function SavedSearchResultsTable({
 
       {sendMessage && (
         <div
-          className={`px-3 py-2 border-b border-vloom-border text-sm ${
+          className={`px-3 py-2 border-b border-vloom-border text-sm flex flex-col gap-2 ${
             sendMessage.type === 'success'
               ? 'bg-green-500/10 text-green-800 dark:text-green-200'
               : 'bg-red-500/10 text-red-800 dark:text-red-200'
           }`}
         >
-          {typeof sendMessage.text === 'string' ? sendMessage.text : String(sendMessage.text ?? '')}
-          <button
-            type="button"
-            onClick={() => setSendMessage(null)}
-            className="ml-2 text-xs underline hover:no-underline"
-          >
-            Dismiss
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex-1 min-w-0">
+              {typeof sendMessage.text === 'string' ? sendMessage.text : String(sendMessage.text ?? '')}
+            </span>
+            {isSessionError && (
+              <button
+                type="button"
+                onClick={handleRefreshSession}
+                disabled={refreshingSession}
+                className="px-2 py-1 rounded bg-amber-200/80 dark:bg-amber-500/30 hover:bg-amber-300/80 dark:hover:bg-amber-500/50 font-medium text-amber-900 dark:text-amber-100 text-xs disabled:opacity-50"
+              >
+                {refreshingSession ? 'Refreshing…' : 'Refresh session'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSendMessage(null)}
+              className="text-xs underline hover:no-underline"
+            >
+              Dismiss
+            </button>
+          </div>
+          {isSessionError && (
+            <p className="text-xs opacity-90">
+              If refreshing does not fix it, the Supabase gateway may be rejecting the token. Redeploy the enrichment
+              functions with JWT verification disabled:{' '}
+              <code className="bg-black/10 dark:bg-white/10 px-1 rounded block mt-1">
+                npx supabase functions deploy enrich-lead-companies --no-verify-jwt
+              </code>
+              <code className="bg-black/10 dark:bg-white/10 px-1 rounded block mt-0.5">
+                npx supabase functions deploy enrich-lead-personas --no-verify-jwt
+              </code>
+            </p>
+          )}
         </div>
       )}
 

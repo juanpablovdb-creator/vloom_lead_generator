@@ -37,7 +37,14 @@ Más detalle: `docs/SUPABASE_SCHEMA.md`.
    npx supabase functions deploy run-job-search --no-verify-jwt
    ```
 
-   Luego cierra sesión en la app, vuelve a entrar y prueba la búsqueda.
+   Para **Send to leads** (Saved Search) si ves "Session expired" aunque refresques, despliega también:
+
+   ```bash
+   npx supabase functions deploy enrich-lead-companies --no-verify-jwt
+   npx supabase functions deploy enrich-lead-personas --no-verify-jwt
+   ```
+
+   Luego cierra sesión en la app, vuelve a entrar y prueba.
 
 ---
 

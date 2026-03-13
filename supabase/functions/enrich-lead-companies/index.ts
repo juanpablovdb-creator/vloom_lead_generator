@@ -271,6 +271,7 @@ Deno.serve(async (req: Request) => {
               company_size: companySize ?? undefined,
               company_industry: industry ?? undefined,
               company_url: website || undefined,
+              company_linkedin_url: linkedinUrl || undefined,
               company_description: description || undefined,
               company_location: locText ?? undefined,
               enrichment_data,

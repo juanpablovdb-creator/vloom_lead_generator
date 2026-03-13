@@ -2,8 +2,8 @@
 // Leadflow Vloom - CRM view (Kanban + Tabla + useLeads)
 // =====================================================
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { LayoutGrid, List, Plus, X } from 'lucide-react';
-import { recomputeLeadScores } from '@/lib/apify';
+import { LayoutGrid, List, Plus, X, Target, Trash2, Loader2 } from 'lucide-react';
+import { recomputeLeadScores, enrichLeadsWithPersonas } from '@/lib/apify';
 import { useLeads, type CreateLeadInput } from '@/hooks/useLeads';
 import { useTasks } from '@/hooks/useTasks';
 import { SUPABASE_CONFIG_HINT } from '@/lib/supabase';
@@ -214,6 +214,7 @@ export function CRMView() {
     updateLeadStatus,
     updateLead,
     createLead,
+    deleteLeads,
     updateFilter,
     filters,
     sort,
@@ -234,9 +235,45 @@ export function CRMView() {
 
   const [viewMode, setViewMode] = useState<CRMViewMode>(() => initialPrefs.viewMode);
   const [recomputingScores, setRecomputingScores] = useState(false);
+  const [personaEnriching, setPersonaEnriching] = useState(false);
+  const [personaEnrichError, setPersonaEnrichError] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [addLeadOpen, setAddLeadOpen] = useState(false);
   const { tasks, updateTaskStatus, updateTaskTitle, deleteTask, createTask, refreshTasks } = useTasks();
+
+  const handleEnrichWithPersonas = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (!ids.length) return;
+    setPersonaEnrichError(null);
+    setPersonaEnriching(true);
+    try {
+      const result = await enrichLeadsWithPersonas(ids);
+      if (result.ok) {
+        await refreshLeads();
+        await refreshTasks();
+        clearSelection();
+      } else {
+        setPersonaEnrichError(result.error ?? 'Enrichment failed');
+      }
+    } catch (err) {
+      setPersonaEnrichError(err instanceof Error ? err.message : 'Enrichment failed');
+    } finally {
+      setPersonaEnriching(false);
+    }
+  }, [selectedIds, refreshLeads, refreshTasks, clearSelection]);
+
+  const handleDeleteSelected = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} selected lead(s)?`)) return;
+    try {
+      await deleteLeads(ids);
+      await refreshLeads();
+      clearSelection();
+    } catch (err) {
+      console.error('Delete failed:', err);
+    }
+  }, [selectedIds, deleteLeads, refreshLeads, clearSelection]);
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -384,12 +421,19 @@ export function CRMView() {
         />
       </div>
 
+      {personaEnrichError && (
+        <div className="mb-4 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 flex items-center justify-between">
+          <span>{personaEnrichError}</span>
+          <button type="button" onClick={() => setPersonaEnrichError(null)} className="p-1 rounded hover:bg-red-500/20">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       {viewMode === 'kanban' ? (
         <CRMKanban
           leads={displayLeads}
           isLoading={isLoading}
           onStatusChange={updateLeadStatus}
-          onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
           onUpdateLead={(id, updates) => updateLead(id, updates)}
           onOpenLead={(lead) => setSelectedLead(lead)}
         />
@@ -407,12 +451,35 @@ export function CRMView() {
           onGenerateEmail={() => {}}
           onSendEmail={() => {}}
           onEnrich={() => {}}
-          onDelete={() => {}}
+          onDelete={(lead) => deleteLeads([lead.id])}
           onStatusChange={(lead, status) => updateLeadStatus(lead.id, status)}
           onToggleShare={() => {}}
           onViewDetails={(lead) => setSelectedLead(lead)}
           onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
           groupSizeByLeadId={groupSizeByLeadId}
+          selectionAction={
+            selectedIds.size > 0 ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleEnrichWithPersonas}
+                  disabled={personaEnriching}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg border border-vloom-accent/50 text-vloom-accent hover:bg-vloom-accent/10 text-sm font-medium disabled:opacity-50"
+                >
+                  {personaEnriching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
+                  Enrich with personas ({selectedIds.size})
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSelected}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-500/50 text-red-400 hover:bg-red-500/10 text-sm font-medium"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete selected
+                </button>
+              </div>
+            ) : undefined
+          }
         />
       )}
 

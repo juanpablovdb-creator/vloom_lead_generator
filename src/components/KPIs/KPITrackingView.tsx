@@ -1,57 +1,130 @@
 // =====================================================
 // Leadflow Vloom - KPI tracking by week (Mon–Sun)
 // =====================================================
-// All metrics are attributed to the week when the lead was first contacted
-// (created_at), not the week when the card was moved.
+// "People contacted" = week when the lead was moved to invite_sent (CRM).
+// Click a number to see the list of people for that metric.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { useLeads } from '@/hooks/useLeads';
 import { computeKPIsByWeek, formatWeekRange, type WeekKPI } from '@/lib/kpiUtils';
+import { supabase } from '@/lib/supabase';
 import { SUPABASE_CONFIG_HINT } from '@/lib/supabase';
+import type { Lead } from '@/types/database';
 
-const DEFAULT_NUM_WEEKS = 12;
+const DEFAULT_NUM_WEEKS = 4;
 const MAX_LEADS_FOR_KPI = 5000;
 
-function pct(num: number, denom: number): string {
-  if (denom === 0) return '0.00%';
-  return ((num / denom) * 100).toFixed(2) + '%';
+/** Format count with rate vs denominator: "12 (24.00%)" for funnel rows. */
+function countWithRate(count: number, denominator: number): string {
+  const rate = denominator > 0 ? ((count / denominator) * 100).toFixed(2) : '0.00';
+  return `${count} (${rate}%)`;
 }
 
-function num(v: number): string {
+function formatTwoDecimals(v: number): string {
   return v.toFixed(2);
+}
+
+function leadLabel(lead: Lead): string {
+  const name = lead.contact_name?.trim() || lead.company_name?.trim() || '—';
+  const company = lead.company_name?.trim();
+  return company && name !== company ? `${name} · ${company}` : name;
+}
+
+type PopoverState = { rowLabel: string; weekLabel: string; leads: Lead[] } | null;
+
+interface KpiCellProps {
+  cell: string | number;
+  leads: Lead[];
+  rowLabel: string;
+  weekLabel: string;
+  onOpenList: (state: PopoverState) => void;
+}
+
+function KpiCell({ cell, leads, rowLabel, weekLabel, onOpenList }: KpiCellProps) {
+  const content =
+    typeof cell === 'number' ? (
+      <span>{formatTwoDecimals(cell)}</span>
+    ) : (() => {
+      const m = String(cell).match(/^\s*(\d+(?:\.\d+)?)\s*\(([^)]+)\)\s*$/);
+      if (m) {
+        const count = formatTwoDecimals(Number(m[1]));
+        const rate = `(${m[2]})`;
+        return (
+          <span className="inline-flex flex-col items-center">
+            <span>{count}</span>
+            <span className="text-xs italic text-vloom-muted">{rate}</span>
+          </span>
+        );
+      }
+      const n = Number(cell);
+      if (!Number.isNaN(n) && String(cell).trim() !== '') {
+        return <span>{formatTwoDecimals(n)}</span>;
+      }
+      return <span>{cell}</span>;
+    })();
+
+  return (
+    <td className="px-4 py-2.5 text-center text-sm text-vloom-text border-b border-vloom-border tabular-nums align-top min-w-[7rem]">
+      <button
+        type="button"
+        onClick={() => leads.length > 0 && onOpenList({ rowLabel, weekLabel, leads })}
+        className={`w-full rounded px-1 py-0.5 -my-0.5 hover:bg-vloom-accent/10 focus:outline-none focus:ring-1 focus:ring-vloom-accent inline-flex flex-col items-center justify-center gap-0.5 ${leads.length === 0 ? 'cursor-default' : 'cursor-pointer'}`}
+      >
+        <span className="inline-flex flex-col items-center gap-0.5">
+          {content}
+          {leads.length > 0 && (
+            <ChevronDown className="w-3.5 h-3.5 text-vloom-muted flex-shrink-0" aria-hidden />
+          )}
+        </span>
+      </button>
+    </td>
+  );
 }
 
 interface RowProps {
   label: string;
   cells: (string | number)[];
+  weeks: WeekKPI[];
+  leadKey: keyof Pick<
+    WeekKPI,
+    | 'peopleContactedLeads'
+    | 'connectedLeads'
+    | 'repliesLeads'
+    | 'positiveRepliesLeads'
+    | 'opportunityLeads'
+    | 'closedLeads'
+    | 'lostLeads'
+    | 'disqualifiedLeads'
+  >;
   highlight?: 'positive' | 'negative' | 'neutral';
+  onOpenList: (state: PopoverState) => void;
 }
 
-function KpiRow({ label, cells, highlight }: RowProps) {
+function KpiRow({ label, cells, weeks, leadKey, highlight, onOpenList }: RowProps) {
   const rowBg =
     highlight === 'positive'
       ? 'bg-emerald-500/10'
       : highlight === 'negative'
         ? 'bg-red-500/10'
         : '';
-  const stickyBg =
-    highlight === 'positive'
-      ? 'bg-emerald-500/10'
-      : highlight === 'negative'
-        ? 'bg-red-500/10'
-        : 'bg-vloom-surface';
+  const stickyBg = 'bg-vloom-surface';
   return (
     <tr className={rowBg}>
-      <td className={`sticky left-0 z-[1] ${stickyBg} px-3 py-2 text-left text-sm font-medium text-vloom-text border-b border-r border-vloom-border whitespace-nowrap`}>
+      <td
+        className={`sticky left-0 z-[1] ${stickyBg} px-4 py-2.5 text-left text-sm font-medium text-vloom-text border-b border-r border-vloom-border whitespace-nowrap min-w-[14rem]`}
+      >
         {label}
       </td>
       {cells.map((cell, i) => (
-        <td
+        <KpiCell
           key={i}
-          className="px-3 py-2 text-right text-sm text-vloom-text border-b border-vloom-border tabular-nums"
-        >
-          {typeof cell === 'number' ? num(cell) : cell}
-        </td>
+          cell={cell}
+          leads={weeks[i]?.[leadKey] ?? []}
+          rowLabel={label}
+          weekLabel={weeks[i]?.weekLabel ?? ''}
+          onOpenList={onOpenList}
+        />
       ))}
     </tr>
   );
@@ -60,23 +133,52 @@ function KpiRow({ label, cells, highlight }: RowProps) {
 function WeekColumnHeader({ week }: { week: WeekKPI }) {
   const label = formatWeekRange(week.monday, week.sunday);
   return (
-    <th className="px-3 py-2 text-right text-xs font-medium text-vloom-muted uppercase tracking-wider border-b border-vloom-border whitespace-nowrap">
+    <th className="px-4 py-2.5 text-center text-xs font-medium text-vloom-muted uppercase tracking-wider border-b border-vloom-border whitespace-nowrap min-w-[7rem]">
       {label}
     </th>
   );
 }
 
+/** First time each lead was moved to invite_sent (from lead_status_history). */
+function useFirstInviteSentByLead(): Map<string, string> | null {
+  const [map, setMap] = useState<Map<string, string> | null>(null);
+
+  const fetchHistory = useCallback(async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from('lead_status_history')
+      .select('lead_id, changed_at')
+      .eq('to_status', 'invite_sent')
+      .order('changed_at', { ascending: true });
+    if (error) return;
+    const byLead = new Map<string, string>();
+    for (const row of (data ?? []) as { lead_id: string; changed_at: string }[]) {
+      if (!byLead.has(row.lead_id)) byLead.set(row.lead_id, row.changed_at);
+    }
+    setMap(byLead);
+  }, []);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  return map;
+}
+
 export function KPITrackingView() {
   const [numWeeks, setNumWeeks] = useState(DEFAULT_NUM_WEEKS);
+  const [listPopover, setListPopover] = useState<PopoverState>(null);
 
   const { leads, isLoading, error } = useLeads({
     pageSize: MAX_LEADS_FOR_KPI,
-    initialFilters: {},
+    initialFilters: { marked_as_lead_only: true },
   });
 
+  const firstInviteSentByLeadId = useFirstInviteSentByLead();
+
   const snapshot = useMemo(
-    () => computeKPIsByWeek(leads, numWeeks),
-    [leads, numWeeks]
+    () => computeKPIsByWeek(leads, numWeeks, firstInviteSentByLeadId),
+    [leads, numWeeks, firstInviteSentByLeadId]
   );
 
   if (error) {
@@ -118,18 +220,60 @@ export function KPITrackingView() {
       </div>
 
       <p className="text-xs text-vloom-muted mb-4">
-        Weeks run Monday–Sunday. Metrics are attributed to the week when the lead was first
-        contacted (entered pipeline), not when the card was moved.
+        Funnel: People contacted (week when moved to Invite sent) → Connected → Replies → Positive
+        replies → Opportunity → Closed. Each row shows count and rate vs people contacted. Click a
+        number to see the list of people for that metric and week. Weeks Mon–Sun; only CRM leads.
       </p>
+
+      {listPopover && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="kpi-list-title"
+          onClick={() => setListPopover(null)}
+        >
+          <div
+            className="bg-vloom-surface border border-vloom-border rounded-lg shadow-xl max-w-md w-full max-h-[70vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-vloom-border">
+              <h2 id="kpi-list-title" className="text-sm font-semibold text-vloom-text">
+                {listPopover.rowLabel} — {listPopover.weekLabel}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setListPopover(null)}
+                className="p-1 rounded text-vloom-muted hover:bg-vloom-border hover:text-vloom-text"
+                aria-label="Cerrar"
+              >
+                ×
+              </button>
+            </div>
+            <ul className="overflow-y-auto px-4 py-2 flex-1 text-sm text-vloom-text divide-y divide-vloom-border">
+              {listPopover.leads.length === 0 ? (
+                <li className="py-2 text-vloom-muted">Ninguna persona</li>
+              ) : (
+                listPopover.leads.map((lead) => (
+                  <li key={lead.id} className="py-2">
+                    {leadLabel(lead)}
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="text-sm text-vloom-muted">Loading…</div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-vloom-border bg-vloom-surface">
-          <table className="w-full min-w-[600px]">
+        <div className="flex justify-center">
+          <div className="overflow-x-auto rounded-lg border border-vloom-border bg-vloom-surface w-max max-w-full">
+            <table className="w-full min-w-[720px]">
             <thead>
               <tr>
-                <th className="sticky left-0 z-10 bg-vloom-surface px-3 py-2 text-left text-xs font-medium text-vloom-muted uppercase tracking-wider border-b border-r border-vloom-border w-64 min-w-[12rem]">
+                <th className="sticky left-0 z-10 bg-vloom-surface px-4 py-2.5 text-left text-xs font-medium text-vloom-muted uppercase tracking-wider border-b border-r border-vloom-border min-w-[14rem]">
                   KPI
                 </th>
                 {weeks.map((w) => (
@@ -141,71 +285,80 @@ export function KPITrackingView() {
               <KpiRow
                 label="People contacted"
                 cells={weeks.map((w) => w.peopleContacted)}
+                weeks={weeks}
+                leadKey="peopleContactedLeads"
+                onOpenList={setListPopover}
               />
               <KpiRow
-                label="% accepted rate (connected)"
+                label="Connected (accepted) · rate vs contacted"
                 cells={weeks.map((w) =>
-                  pct(w.connected, w.peopleContacted)
+                  countWithRate(w.connected, w.peopleContacted)
                 )}
+                weeks={weeks}
+                leadKey="connectedLeads"
+                onOpenList={setListPopover}
               />
               <KpiRow
-                label="Connected (accepted invitation)"
-                cells={weeks.map((w) => w.connected)}
-              />
-              <KpiRow
-                label="% reply rate"
-                cells={weeks.map((w) => pct(w.replies, w.peopleContacted))}
-              />
-              <KpiRow
-                label="Replies"
-                cells={weeks.map((w) => w.replies)}
-              />
-              <KpiRow
-                label="% of positive replies (from replies)"
+                label="Replies · rate vs contacted"
                 cells={weeks.map((w) =>
-                  w.replies > 0 ? pct(w.positiveReplies, w.replies) : '0.00%'
+                  countWithRate(w.replies, w.peopleContacted)
                 )}
+                weeks={weeks}
+                leadKey="repliesLeads"
+                onOpenList={setListPopover}
               />
               <KpiRow
-                label="Positive replies"
-                cells={weeks.map((w) => w.positiveReplies)}
+                label="Positive replies · rate vs contacted"
+                cells={weeks.map((w) =>
+                  countWithRate(w.positiveReplies, w.peopleContacted)
+                )}
+                weeks={weeks}
+                leadKey="positiveRepliesLeads"
                 highlight="positive"
+                onOpenList={setListPopover}
               />
               <KpiRow
-                label="% qualified lead rate (opportunity)"
+                label="Opportunity · rate vs contacted"
                 cells={weeks.map((w) =>
-                  w.peopleContacted > 0
-                    ? pct(w.opportunity, w.peopleContacted)
-                    : '0.00%'
+                  countWithRate(w.opportunity, w.peopleContacted)
                 )}
-              />
-              <KpiRow
-                label="Opportunity (negotiation / closed)"
-                cells={weeks.map((w) => w.opportunity)}
+                weeks={weeks}
+                leadKey="opportunityLeads"
                 highlight="positive"
+                onOpenList={setListPopover}
               />
               <KpiRow
-                label="% conversion rate (closed)"
+                label="Closed (won) · rate vs contacted"
                 cells={weeks.map((w) =>
-                  w.peopleContacted > 0 ? pct(w.closed, w.peopleContacted) : '0.00%'
+                  countWithRate(w.closed, w.peopleContacted)
                 )}
-              />
-              <KpiRow
-                label="Closed (won)"
-                cells={weeks.map((w) => w.closed)}
+                weeks={weeks}
+                leadKey="closedLeads"
                 highlight="positive"
+                onOpenList={setListPopover}
               />
               <KpiRow
-                label="Lost"
-                cells={weeks.map((w) => w.lost)}
+                label="Lost · rate vs contacted"
+                cells={weeks.map((w) =>
+                  countWithRate(w.lost, w.peopleContacted)
+                )}
+                weeks={weeks}
+                leadKey="lostLeads"
                 highlight="negative"
+                onOpenList={setListPopover}
               />
               <KpiRow
-                label="Disqualified"
-                cells={weeks.map((w) => w.disqualified)}
+                label="Disqualified · rate vs contacted"
+                cells={weeks.map((w) =>
+                  countWithRate(w.disqualified, w.peopleContacted)
+                )}
+                weeks={weeks}
+                leadKey="disqualifiedLeads"
+                onOpenList={setListPopover}
               />
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
       )}
 

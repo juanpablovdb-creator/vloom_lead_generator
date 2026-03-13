@@ -65,7 +65,14 @@ Si ya subiste "Access token expiry time" en **Project Settings → JWT Keys** y 
 npx supabase functions deploy run-job-search --no-verify-jwt
 ```
 
-Luego cierra sesión en la app, vuelve a entrar y prueba la búsqueda.
+Para **Send to leads** desde Saved Search (401 / "Session expired" aunque refresques):
+
+```bash
+npx supabase functions deploy enrich-lead-companies --no-verify-jwt
+npx supabase functions deploy enrich-lead-personas --no-verify-jwt
+```
+
+Luego cierra sesión en la app, vuelve a entrar y prueba.
 
 ---
 

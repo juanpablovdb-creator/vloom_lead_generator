@@ -3,9 +3,11 @@
 // Left: main fields, Video Sent checkbox, Show more (all fields), Tasks.
 // Right: Activity timeline.
 // =====================================================
-import { useState, useMemo } from 'react';
-import { X, ChevronDown, ChevronUp, CheckCircle2, Circle } from 'lucide-react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { X, ChevronDown, ChevronUp, CheckCircle2, Circle, UserMinus } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import type { Lead, LeadStatus } from '@/types/database';
+import type { LeadStatusHistory } from '@/types/database';
 import type { TaskWithLead } from '@/hooks/useTasks';
 import type { TaskStatus } from '@/types/database';
 
@@ -116,6 +118,48 @@ export function LeadCardPopup({
 }: LeadCardPopupProps) {
   const [showMore, setShowMore] = useState(false);
   const [localLead, setLocalLead] = useState(lead);
+  const [statusHistory, setStatusHistory] = useState<LeadStatusHistory[]>([]);
+  const [otherContactsAtCompany, setOtherContactsAtCompany] = useState<Pick<Lead, 'id' | 'contact_name' | 'contact_email' | 'company_name'>[]>([]);
+
+  const fetchOtherContactsAtCompany = useCallback(async () => {
+    if (!supabase || !localLead.id) return;
+    const linkedInUrl = localLead.company_linkedin_url?.trim();
+    const companyName = localLead.company_name?.trim();
+    if (!linkedInUrl && !companyName) {
+      setOtherContactsAtCompany([]);
+      return;
+    }
+    let query = supabase
+      .from('leads')
+      .select('id, contact_name, contact_email, company_name')
+      .eq('user_id', localLead.user_id)
+      .neq('id', localLead.id);
+    if (linkedInUrl) {
+      query = query.eq('company_linkedin_url', linkedInUrl);
+    } else {
+      query = query.eq('company_name', companyName);
+    }
+    const { data } = await query.limit(50);
+    setOtherContactsAtCompany((data as Pick<Lead, 'id' | 'contact_name' | 'contact_email' | 'company_name'>[]) ?? []);
+  }, [localLead.id, localLead.user_id, localLead.company_linkedin_url, localLead.company_name]);
+
+  useEffect(() => {
+    fetchOtherContactsAtCompany();
+  }, [fetchOtherContactsAtCompany]);
+
+  const fetchStatusHistory = useCallback(async () => {
+    if (!lead?.id || !supabase) return;
+    const { data, error } = await supabase
+      .from('lead_status_history')
+      .select('id, lead_id, from_status, to_status, changed_at')
+      .eq('lead_id', lead.id)
+      .order('changed_at', { ascending: false });
+    if (!error) setStatusHistory((data as LeadStatusHistory[]) ?? []);
+  }, [lead?.id]);
+
+  useEffect(() => {
+    fetchStatusHistory();
+  }, [fetchStatusHistory]);
 
   const videoSent = localLead.tags?.includes('video_sent') ?? false;
   const toggleVideoSent = async () => {
@@ -130,6 +174,7 @@ export function LeadCardPopup({
     if (!onUpdateLeadStatus) return;
     await onUpdateLeadStatus(localLead.id, status);
     setLocalLead({ ...localLead, status });
+    await fetchStatusHistory();
   };
 
   const enrich = localLead.enrichment_data as Record<string, unknown> | null | undefined;
@@ -146,16 +191,23 @@ export function LeadCardPopup({
   }, [enrich]);
 
   const activityItems = useMemo(() => {
-    const items: { label: string; date: string }[] = [];
-    if (localLead.created_at) items.push({ label: 'Lead imported', date: formatDate(localLead.created_at) });
-    if (localLead.last_enriched_at) items.push({ label: 'Enriched', date: formatDate(localLead.last_enriched_at) });
-    if (localLead.updated_at) items.push({ label: 'Last updated', date: formatDate(localLead.updated_at) });
-    items.push({ label: 'Status', date: CRM_STATUS_LABEL[localLead.status] });
-    tasksForLead.filter((t) => t.status === 'done' || t.status === 'cancelled').forEach((t) => {
-      items.push({ label: `Task completed: ${t.title}`, date: formatDate(t.updated_at) });
+    const items: { label: string; date: string; sortKey?: string }[] = [];
+    if (localLead.created_at) items.push({ label: 'Lead imported', date: formatDate(localLead.created_at), sortKey: localLead.created_at });
+    if (localLead.last_enriched_at) items.push({ label: 'Enriched', date: formatDate(localLead.last_enriched_at), sortKey: localLead.last_enriched_at });
+    if (localLead.updated_at) items.push({ label: 'Last updated', date: formatDate(localLead.updated_at), sortKey: localLead.updated_at });
+    items.push({ label: 'Status', date: CRM_STATUS_LABEL[localLead.status], sortKey: localLead.updated_at ?? localLead.created_at ?? '' });
+    statusHistory.forEach((h) => {
+      const toLabel = CRM_STATUS_LABEL[h.to_status as LeadStatus] ?? h.to_status;
+      const fromLabel = h.from_status ? (CRM_STATUS_LABEL[h.from_status as LeadStatus] ?? h.from_status) : null;
+      const label = fromLabel ? `Moved to ${toLabel} (from ${fromLabel})` : `Moved to ${toLabel}`;
+      items.push({ label, date: formatDate(h.changed_at), sortKey: h.changed_at });
     });
-    return items;
-  }, [localLead.created_at, localLead.last_enriched_at, localLead.updated_at, localLead.status, tasksForLead]);
+    tasksForLead.filter((t) => t.status === 'done' || t.status === 'cancelled').forEach((t) => {
+      items.push({ label: `Task completed: ${t.title}`, date: formatDate(t.updated_at), sortKey: t.updated_at });
+    });
+    items.sort((a, b) => (b.sortKey ?? '').localeCompare(a.sortKey ?? ''));
+    return items.map(({ label, date }) => ({ label, date }));
+  }, [localLead.created_at, localLead.last_enriched_at, localLead.updated_at, localLead.status, statusHistory, tasksForLead]);
 
   const initialFields = (
     <>
@@ -228,6 +280,28 @@ export function LeadCardPopup({
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Channel</div>
           <div className="text-sm text-vloom-text">{localLead.channel || '—'}</div>
         </div>
+      </div>
+
+      <div className="pt-3 border-t border-vloom-border">
+        <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-2">Other contacts at this company</div>
+        {otherContactsAtCompany.length === 0 ? (
+          <p className="text-sm text-vloom-muted">
+            No other contacts yet. Run &quot;Enrich with personas&quot; from the CRM table (select this lead and click the button) to find more people at this company.
+          </p>
+        ) : (
+          <ul className="space-y-1.5 text-sm text-vloom-text">
+            {otherContactsAtCompany.map((l) => (
+              <li key={l.id}>
+                {l.contact_name || '—'}
+                {l.contact_email && (
+                  <a href={`mailto:${l.contact_email}`} className="ml-2 text-vloom-accent hover:underline text-xs break-all">
+                    {l.contact_email}
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </>
   );
@@ -304,6 +378,27 @@ export function LeadCardPopup({
                 className="w-full max-w-xs rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
               />
             </div>
+
+            {localLead.is_marked_as_lead && (
+              <div className="pt-4 border-t border-vloom-border">
+                <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-2">Remove from CRM</div>
+                <p className="text-sm text-vloom-muted mb-2">
+                  This will unmark the lead so it no longer appears in the CRM pipeline. The record is not deleted.
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!confirm('Remove this lead from the CRM? It will disappear from the pipeline but the record will remain.')) return;
+                    await onUpdateLead(localLead.id, { is_marked_as_lead: false });
+                    onClose();
+                  }}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-red-500/50 text-red-400 hover:bg-red-500/10 text-sm font-medium"
+                >
+                  <UserMinus className="w-4 h-4" />
+                  Remove from leads
+                </button>
+              </div>
+            )}
 
             {!showMore ? (
               <button

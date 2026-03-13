@@ -2,19 +2,17 @@
 // Leadflow Vloom - CRM card (Kanban)
 // =====================================================
 import { useState } from 'react';
-import { Check } from 'lucide-react';
 import type { Lead } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 
 interface CRMCardProps {
   lead: Lead;
   onDragStart: (e: React.DragEvent, lead: Lead) => void;
-  onMarkAsLead?: (lead: Lead, value: boolean) => void;
   onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
   onOpen?: (lead: Lead) => void;
 }
 
-export function CRMCard({ lead, onDragStart, onMarkAsLead, onUpdateLead, onOpen }: CRMCardProps) {
+export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProps) {
   const [isNotesOpen, setIsNotesOpen] = useState(false);
   const [notesDraft, setNotesDraft] = useState<string>(lead.notes ?? '');
   const [savingNotes, setSavingNotes] = useState(false);
@@ -44,23 +42,6 @@ export function CRMCard({ lead, onDragStart, onMarkAsLead, onUpdateLead, onOpen 
           <p className="text-sm font-medium text-vloom-text truncate">{companyName}</p>
           {subLine && <p className="text-[11px] text-vloom-muted truncate mt-0.5 leading-tight">{subLine}</p>}
         </div>
-        {onMarkAsLead && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onMarkAsLead(lead, !lead.is_marked_as_lead);
-            }}
-            className={`flex-shrink-0 p-1 rounded border transition-colors ${
-              lead.is_marked_as_lead
-                ? 'border-vloom-accent bg-vloom-accent/10 text-vloom-accent'
-                : 'border-vloom-border hover:bg-vloom-border/30 text-vloom-muted'
-            }`}
-            title={lead.is_marked_as_lead ? 'Remove from leads' : 'Mark as lead'}
-          >
-            <Check className={`w-3.5 h-3.5 ${lead.is_marked_as_lead ? '' : 'opacity-40'}`} />
-          </button>
-        )}
       </div>
       <div className="mt-1 space-y-0.5 text-[11px] leading-snug text-vloom-muted">
         {lead.job_title && (

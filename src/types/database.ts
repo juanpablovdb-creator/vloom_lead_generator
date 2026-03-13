@@ -220,6 +220,15 @@ export interface Task {
   updated_at: string;
 }
 
+/** One row per CRM stage move (for Activity in lead card). */
+export interface LeadStatusHistory {
+  id: string;
+  lead_id: string;
+  from_status: string | null;
+  to_status: string;
+  changed_at: string;
+}
+
 /** Persona: target profile for people enrichment (harvestapi/linkedin-company-employees). Company URL comes from each lead record. */
 export type ProfileScraperMode = 'Short' | 'Full' | 'Full + email search';
 
@@ -418,6 +427,11 @@ export interface Database {
         Row: Persona;
         Insert: Omit<Persona, 'id' | 'created_at' | 'updated_at'>;
         Update: Partial<Omit<Persona, 'id' | 'user_id'>>;
+      };
+      lead_status_history: {
+        Row: LeadStatusHistory;
+        Insert: Omit<LeadStatusHistory, 'id'>;
+        Update: Partial<Omit<LeadStatusHistory, 'id' | 'lead_id'>>;
       };
     };
   };
