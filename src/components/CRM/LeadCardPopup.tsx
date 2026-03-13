@@ -135,9 +135,9 @@ export function LeadCardPopup({
       .eq('user_id', localLead.user_id)
       .neq('id', localLead.id);
     if (linkedInUrl) {
-      query = query.eq('company_linkedin_url', linkedInUrl);
+      query = query.eq('company_linkedin_url', linkedInUrl as never);
     } else {
-      query = query.eq('company_name', companyName);
+      query = query.eq('company_name', companyName as never);
     }
     const { data } = await query.limit(50);
     setOtherContactsAtCompany((data as Pick<Lead, 'id' | 'contact_name' | 'contact_email' | 'company_name'>[]) ?? []);
