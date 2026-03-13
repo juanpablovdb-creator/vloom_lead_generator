@@ -15,6 +15,7 @@ import {
   FolderOpen,
   Users,
   Building,
+  Megaphone,
 } from 'lucide-react';
 import type { LeadFilters, LeadStatus, LeadViewBy } from '@/types/database';
 import { useSavedSearches } from '@/hooks/useSavedSearches';
@@ -42,6 +43,17 @@ const SOURCE_OPTIONS = [
   { value: 'linkedin', label: 'LinkedIn' },
   { value: 'indeed', label: 'Indeed' },
   { value: 'glassdoor', label: 'Glassdoor' },
+];
+
+const CHANNEL_OPTIONS = [
+  { value: 'LinkedIn', label: 'LinkedIn' },
+  { value: 'Website', label: 'Website' },
+  { value: 'Referral', label: 'Referral' },
+  { value: 'Event', label: 'Event' },
+  { value: 'Cold outreach', label: 'Cold outreach' },
+  { value: 'Email', label: 'Email' },
+  { value: 'Youtube Jobs', label: 'Youtube Jobs' },
+  { value: 'Other', label: 'Other' },
 ];
 
 const COMPANY_SIZE_OPTIONS = [
@@ -347,6 +359,15 @@ export function FilterBar({
           options={SOURCE_OPTIONS}
           selectedValues={filters.source || []}
           onChange={(values) => onFilterChange('source', values.length > 0 ? values : undefined)}
+        />
+
+        {/* Channel dropdown */}
+        <FilterDropdown
+          label="Channel"
+          icon={Megaphone}
+          options={CHANNEL_OPTIONS}
+          selectedValues={filters.channel || []}
+          onChange={(values) => onFilterChange('channel', values.length > 0 ? values : undefined)}
         />
 
         {/* Company size dropdown */}

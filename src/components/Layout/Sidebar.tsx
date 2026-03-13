@@ -12,9 +12,10 @@ import {
   ChevronDown,
   ChevronRight,
   LogOut,
+  Target,
 } from 'lucide-react';
 
-export type SectionId = 'tasks' | 'discovery' | 'crm' | 'kpis';
+export type SectionId = 'tasks' | 'personas' | 'discovery' | 'crm' | 'kpis';
 export type DiscoverySubId = 'new-search' | 'saved-searches' | 'leads-lists';
 
 export interface SidebarProps {
@@ -81,6 +82,9 @@ export function Sidebar({ activeSection, activeDiscoverySub, onNavigate, userEma
       <nav className="flex-1 p-3 space-y-0.5">
         {/* Tasks */}
         {navItem('tasks', 'Tasks', <CheckSquare className="w-4 h-4" />)}
+
+        {/* Personas */}
+        {navItem('personas', 'Personas', <Target className="w-4 h-4" />)}
 
         {/* Discovery (expandible) */}
         <div>

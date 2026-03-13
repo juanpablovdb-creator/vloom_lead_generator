@@ -66,6 +66,7 @@ const DEFAULT_COLUMNS: TableColumn[] = [
   { key: 'contact_email', label: 'Email', visible: true, sortable: false },
   { key: 'score', label: 'Score', visible: true, sortable: true },
   { key: 'status', label: 'Status', visible: true, sortable: true },
+  { key: 'channel', label: 'Channel', visible: true, sortable: true },
   { key: 'job_source', label: 'Source', visible: false, sortable: true },
   { key: 'job_posted_at', label: 'Posted at', visible: true, sortable: true },
   { key: 'last_enriched_at', label: 'Enriched', visible: true, sortable: true },

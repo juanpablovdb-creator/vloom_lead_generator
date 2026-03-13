@@ -105,6 +105,9 @@ export interface Lead {
   job_external_id: string | null;
   /** Only true when user explicitly marks as lead; CRM and Leads list filter by this. */
   is_marked_as_lead: boolean;
+
+  /** Channel where this lead was received (e.g. LinkedIn, Website, Referral). */
+  channel: string | null;
   
   // Timestamps
   created_at: string;
@@ -217,6 +220,24 @@ export interface Task {
   updated_at: string;
 }
 
+/** Persona: target profile for people enrichment (harvestapi/linkedin-company-employees). Company URL comes from each lead record. */
+export type ProfileScraperMode = 'Short' | 'Full' | 'Full + email search';
+
+export interface Persona {
+  id: string;
+  user_id: string;
+  name: string;
+  persona_function: string | null;
+  seniority: string | null;
+  job_title_keywords: string[];
+  locations: string[];
+  max_items: number | null;
+  profile_scraper_mode: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // =====================================================
 // API Response Types
 // =====================================================
@@ -293,6 +314,8 @@ export interface LeadFilters {
   marked_as_lead_only?: boolean;
   /** Leads list and CRM: view by company or by person. */
   view_by?: LeadViewBy;
+  /** Filter by channel (e.g. LinkedIn, Website). */
+  channel?: string[];
 }
 
 export interface LeadSort {
@@ -390,6 +413,11 @@ export interface Database {
         Row: Task;
         Insert: Omit<Task, 'id' | 'created_at' | 'updated_at'>;
         Update: Partial<Omit<Task, 'id' | 'user_id' | 'lead_id'>>;
+      };
+      personas: {
+        Row: Persona;
+        Insert: Omit<Persona, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<Persona, 'id' | 'user_id'>>;
       };
     };
   };

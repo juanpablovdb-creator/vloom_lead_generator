@@ -75,6 +75,12 @@ export function CRMCard({ lead, onDragStart, onMarkAsLead, onUpdateLead, onOpen 
             {lead.company_location}
           </p>
         )}
+        {lead.channel && (
+          <p>
+            <span className="font-medium text-vloom-text">Channel: </span>
+            {lead.channel}
+          </p>
+        )}
         <div className="flex items-center justify-between">
           <span className="font-medium text-vloom-text">Score: {lead.score}</span>
           {lead.tags && lead.tags.length > 0 && <span>{lead.tags.length} tags</span>}

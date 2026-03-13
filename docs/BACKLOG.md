@@ -20,6 +20,7 @@ Items priorizados, sin fecha asignada.
 - [ ] Schema Supabase + migraciones ejecutadas
 - [ ] Auth multi-usuario (Supabase Auth)
 - [ ] Enriquecimiento de leads (compañía, contacto)
+- [ ] Personas: pipeline de enriquecimiento de personas (Edge Function + harvestapi/linkedin-company-employees por URL de compañía; crear un lead por persona encontrada)
 - [ ] Scoring configurable con pesos
 - [ ] Email con IA (Claude) + SendGrid
 - [ ] Fuentes LinkedIn Jobs, Indeed, Glassdoor operativas
@@ -59,6 +60,9 @@ Items preparados para la próxima. 40-60% claros.
 
 ## Completado
 
+- [x] Personas tab + API: tabla personas, usePersonas, PersonasView (CRUD), pestaña debajo de Tasks.
+- [x] KPI tracking: tabla por semana (Mon–Sun), atribución al primer contacto del lead, vista KPIs en sidebar
+- [x] CRM: Add new leads from CRM + Channel field (modal Add lead, channel en lead, filtro y columna)
 - [x] Login obligatorio en producción: sin Supabase config en prod → pantalla "Configuración requerida"; con Supabase → AuthPage si no hay usuario.
 - [x] Guía de deploy a producción (docs/DEPLOY.md, Vercel/Netlify, checklist Supabase)
 - [x] Build TS corregido para deploy (vite-env.d.ts, SupabaseClient<any>, guards, aserciones)

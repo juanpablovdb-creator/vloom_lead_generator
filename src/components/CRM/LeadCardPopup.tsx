@@ -224,6 +224,10 @@ export function LeadCardPopup({
             </a>
           </div>
         )}
+        <div>
+          <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Channel</div>
+          <div className="text-sm text-vloom-text">{localLead.channel || '—'}</div>
+        </div>
       </div>
     </>
   );
@@ -284,6 +288,22 @@ export function LeadCardPopup({
                 </select>
               </div>
             )}
+
+            <div>
+              <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Channel</div>
+              <input
+                type="text"
+                value={localLead.channel ?? ''}
+                onChange={(e) => setLocalLead({ ...localLead, channel: e.target.value })}
+                onBlur={async () => {
+                  const v = (localLead.channel ?? '').trim() || null;
+                  await onUpdateLead(localLead.id, { channel: v });
+                  setLocalLead((prev) => ({ ...prev, channel: v }));
+                }}
+                placeholder="e.g. LinkedIn, Website, Referral"
+                className="w-full max-w-xs rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+              />
+            </div>
 
             {!showMore ? (
               <button

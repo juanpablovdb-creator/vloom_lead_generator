@@ -2,10 +2,29 @@
 // Leadflow Vloom - useLeads Hook
 // =====================================================
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase, getCurrentUser } from '@/lib/supabase';
 import type { Lead, LeadFilters, LeadSort, PaginationState, LeadStatus } from '@/types/database';
 
 const SUPABASE_NOT_CONFIGURED = 'Configure Supabase: add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env';
+
+/** Minimal input to create a new lead from the CRM (manual entry). */
+export interface CreateLeadInput {
+  company_name?: string | null;
+  contact_name?: string | null;
+  contact_email?: string | null;
+  contact_title?: string | null;
+  contact_linkedin_url?: string | null;
+  contact_phone?: string | null;
+  company_url?: string | null;
+  company_linkedin_url?: string | null;
+  company_size?: string | null;
+  company_industry?: string | null;
+  company_location?: string | null;
+  job_title?: string | null;
+  notes?: string | null;
+  channel?: string | null;
+  status?: LeadStatus;
+}
 
 interface UseLeadsOptions {
   initialFilters?: LeadFilters;
@@ -37,6 +56,7 @@ interface UseLeadsReturn {
   
   // Actions
   refreshLeads: () => Promise<void>;
+  createLead: (data: CreateLeadInput) => Promise<Lead | null>;
   updateLead: (id: string, updates: Partial<Lead>) => Promise<void>;
   deleteLead: (id: string) => Promise<void>;
   deleteLeads: (ids: string[]) => Promise<void>;
@@ -164,6 +184,11 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     // Tags filter
     if (filters.tags && filters.tags.length > 0) {
       query = query.contains('tags', filters.tags);
+    }
+
+    // Channel filter
+    if (filters.channel && filters.channel.length > 0) {
+      query = query.in('channel', filters.channel);
     }
 
     // Only show rows user marked as lead (for "Leads" / CRM view)
@@ -299,6 +324,67 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
   }, []);
 
   // CRUD operations (no-op when Supabase not configured)
+  const createLead = useCallback(async (data: CreateLeadInput): Promise<Lead | null> => {
+    if (!supabase) return null;
+    const user = await getCurrentUser();
+    if (!user) return null;
+    const defaultWeights = {
+      has_email: 25,
+      has_linkedin: 15,
+      company_size_match: 20,
+      industry_match: 20,
+      recent_posting: 20,
+    };
+    const row = {
+      user_id: user.id,
+      is_shared: false,
+      job_title: data.job_title ?? null,
+      job_description: null,
+      job_url: null,
+      job_source: null,
+      job_location: null,
+      job_salary_range: null,
+      job_posted_at: null,
+      company_name: data.company_name ?? null,
+      company_url: data.company_url ?? null,
+      company_linkedin_url: data.company_linkedin_url ?? null,
+      company_size: data.company_size ?? null,
+      company_industry: data.company_industry ?? null,
+      company_description: null,
+      company_funding: null,
+      company_location: data.company_location ?? null,
+      contact_name: data.contact_name ?? null,
+      contact_title: data.contact_title ?? null,
+      contact_email: data.contact_email ?? null,
+      contact_linkedin_url: data.contact_linkedin_url ?? null,
+      contact_phone: data.contact_phone ?? null,
+      status: (data.status ?? 'not_contacted') as LeadStatus,
+      score: 0,
+      score_weights: defaultWeights,
+      enrichment_data: {},
+      last_enriched_at: null,
+      notes: data.notes ?? null,
+      tags: [],
+      scraping_job_id: null,
+      job_external_id: null,
+      is_marked_as_lead: true,
+      channel: data.channel ?? null,
+    };
+    const { data: inserted, error: insertError } = await supabase
+      .from('leads')
+      .insert(row as never)
+      .select()
+      .single();
+    if (insertError) throw insertError;
+    const lead = inserted as Lead;
+    setLeads(prev => [lead, ...prev]);
+    setTotalCount(prev => prev + 1);
+    // Create default "Contact ..." task for new manual lead
+    const contactLabel = [lead.company_name, lead.contact_name].filter(Boolean).join(' – ') || 'lead';
+    await supabase.from('tasks').insert({ user_id: user.id, lead_id: lead.id, title: `Contact ${contactLabel}`, status: 'pending' } as never);
+    return lead;
+  }, []);
+
   const updateLead = useCallback(async (id: string, updates: Partial<Lead>) => {
     if (!supabase) return;
     const lead = leads.find(l => l.id === id);
@@ -424,6 +510,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     
     // Actions
     refreshLeads: fetchLeads,
+    createLead,
     updateLead,
     deleteLead,
     deleteLeads,

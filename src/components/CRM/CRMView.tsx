@@ -2,9 +2,9 @@
 // Leadflow Vloom - CRM view (Kanban + Tabla + useLeads)
 // =====================================================
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { LayoutGrid, List } from 'lucide-react';
+import { LayoutGrid, List, Plus, X } from 'lucide-react';
 import { recomputeLeadScores } from '@/lib/apify';
-import { useLeads } from '@/hooks/useLeads';
+import { useLeads, type CreateLeadInput } from '@/hooks/useLeads';
 import { useTasks } from '@/hooks/useTasks';
 import { SUPABASE_CONFIG_HINT } from '@/lib/supabase';
 import { getDisplayLeadsForView } from '@/lib/leadViewUtils';
@@ -13,6 +13,17 @@ import { CRMKanban } from './CRMKanban';
 import { LeadsTable } from '@/components/LeadsTable';
 import { FilterBar } from '@/components/FilterBar';
 import { LeadCardPopup } from './LeadCardPopup';
+
+const CHANNEL_OPTIONS = [
+  { value: 'LinkedIn', label: 'LinkedIn' },
+  { value: 'Website', label: 'Website' },
+  { value: 'Referral', label: 'Referral' },
+  { value: 'Event', label: 'Event' },
+  { value: 'Cold outreach', label: 'Cold outreach' },
+  { value: 'Email', label: 'Email' },
+  { value: 'Youtube Jobs', label: 'Youtube Jobs' },
+  { value: 'Other', label: 'Other' },
+];
 
 const CRM_PREFS_KEY = 'leadflow_crm_preferences';
 
@@ -49,6 +60,150 @@ function setCRMPreferences(prefs: Partial<CRMPreferences>) {
   }
 }
 
+interface AddLeadModalProps {
+  onClose: () => void;
+  onCreate: (data: CreateLeadInput) => Promise<Lead | null>;
+  onCreated: (lead: Lead) => void;
+}
+
+function AddLeadModal({ onClose, onCreate, onCreated }: AddLeadModalProps) {
+  const [company_name, setCompany_name] = useState('');
+  const [contact_name, setContact_name] = useState('');
+  const [contact_email, setContact_email] = useState('');
+  const [channel, setChannel] = useState('');
+  const [channelOther, setChannelOther] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      const channelValue = channel === 'Other' ? (channelOther.trim() || null) : (channel || null);
+      const lead = await onCreate({
+        company_name: company_name.trim() || null,
+        contact_name: contact_name.trim() || null,
+        contact_email: contact_email.trim() || null,
+        channel: channelValue,
+        notes: notes.trim() || null,
+      });
+      if (lead) {
+        onCreated(lead);
+        onClose();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create lead');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div
+        className="w-full max-w-md bg-vloom-surface rounded-xl border border-vloom-border shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-vloom-border">
+          <h2 className="text-lg font-semibold text-vloom-text">Add new lead</h2>
+          <button type="button" onClick={onClose} className="p-2 rounded-md text-vloom-muted hover:text-vloom-text hover:bg-vloom-border/30">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+          {error && (
+            <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Company</label>
+            <input
+              type="text"
+              value={company_name}
+              onChange={(e) => setCompany_name(e.target.value)}
+              placeholder="Company name"
+              className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Contact name</label>
+            <input
+              type="text"
+              value={contact_name}
+              onChange={(e) => setContact_name(e.target.value)}
+              placeholder="Contact name"
+              className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Email</label>
+            <input
+              type="email"
+              value={contact_email}
+              onChange={(e) => setContact_email(e.target.value)}
+              placeholder="contact@company.com"
+              className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Channel</label>
+            <select
+              value={channel}
+              onChange={(e) => setChannel(e.target.value)}
+              className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
+            >
+              <option value="">Select channel</option>
+              {CHANNEL_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {channel === 'Other' && (
+              <input
+                type="text"
+                value={channelOther}
+                onChange={(e) => setChannelOther(e.target.value)}
+                placeholder="Specify channel"
+                className="mt-2 w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
+              />
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Notes (optional)</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Notes"
+              rows={2}
+              className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent resize-none"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-2 text-sm text-vloom-muted hover:text-vloom-text rounded-lg border border-vloom-border"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-3 py-2 text-sm font-medium text-white bg-vloom-accent rounded-lg hover:opacity-90 disabled:opacity-50"
+            >
+              {submitting ? 'Adding…' : 'Add lead'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function CRMView() {
   const [initialPrefs] = useState(() => getCRMPreferences());
 
@@ -58,6 +213,7 @@ export function CRMView() {
     error,
     updateLeadStatus,
     updateLead,
+    createLead,
     updateFilter,
     filters,
     sort,
@@ -79,6 +235,7 @@ export function CRMView() {
   const [viewMode, setViewMode] = useState<CRMViewMode>(() => initialPrefs.viewMode);
   const [recomputingScores, setRecomputingScores] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [addLeadOpen, setAddLeadOpen] = useState(false);
   const { tasks, updateTaskStatus, updateTaskTitle, deleteTask, createTask, refreshTasks } = useTasks();
 
   const activeFilterCount = useMemo(() => {
@@ -95,6 +252,7 @@ export function CRMView() {
     if (filters.saved_search_id) count++;
     if (filters.marked_as_lead_only === true) count++;
     if (filters.view_by) count++;
+    if (filters.channel?.length) count++;
     return count;
   }, [filters]);
 
@@ -139,6 +297,14 @@ export function CRMView() {
       <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
         <h1 className="text-lg font-semibold text-vloom-text">CRM</h1>
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setAddLeadOpen(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-vloom-accent text-white text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-4 h-4" />
+            Add lead
+          </button>
           <label className="flex items-center gap-2 text-sm text-vloom-text cursor-pointer">
             <input
               type="checkbox"
@@ -211,6 +377,7 @@ export function CRMView() {
             updateFilter('search', undefined);
             updateFilter('tags', undefined);
             updateFilter('saved_search_id', undefined);
+            updateFilter('channel', undefined);
             updateFilter('marked_as_lead_only', filters.marked_as_lead_only);
           }}
           activeFilterCount={activeFilterCount}
@@ -246,6 +413,14 @@ export function CRMView() {
           onViewDetails={(lead) => setSelectedLead(lead)}
           onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
           groupSizeByLeadId={groupSizeByLeadId}
+        />
+      )}
+
+      {addLeadOpen && (
+        <AddLeadModal
+          onClose={() => setAddLeadOpen(false)}
+          onCreate={createLead}
+          onCreated={(lead) => setSelectedLead(lead)}
         />
       )}
 

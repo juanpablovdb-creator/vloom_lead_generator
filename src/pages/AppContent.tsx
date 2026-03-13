@@ -7,7 +7,9 @@ import type { SectionId, DiscoverySubId } from '@/components/Layout';
 import { HomePage, LeadSource } from '@/pages/HomePage';
 import { SearchConfigPage } from '@/pages/SearchConfigPage';
 import { CRMView } from '@/components/CRM';
+import { KPITrackingView } from '@/components/KPIs/KPITrackingView';
 import { TasksView } from '@/components/TasksView';
+import { PersonasView } from '@/components/PersonasView';
 import { LeadsTable } from '@/components/LeadsTable';
 import { runJobSearchViaEdge, recomputeLeadScores } from '@/lib/apify';
 import { SavedSearchesView } from '@/components/SavedSearchesView';
@@ -117,6 +119,7 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
       {section === 'tasks' && (
         <TasksView onNavigateToLead={() => setSection('crm')} />
       )}
+      {section === 'personas' && <PersonasView />}
       {section === 'discovery' && discoverySub === 'new-search' && (
         <DiscoveryNewSearchPlaceholder onSelectSource={handleSelectSource} />
       )}
@@ -146,7 +149,7 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
         <LeadsListView lastSearchResult={lastSearchResult} onDismissResult={() => setLastSearchResult(null)} />
       )}
       {section === 'crm' && <CRMView />}
-      {section === 'kpis' && <KPIsPlaceholder />}
+      {section === 'kpis' && <KPITrackingView />}
         </>
       )}
     </AppLayout>
@@ -361,13 +364,3 @@ function LeadsListView({
   );
 }
 
-function KPIsPlaceholder() {
-  return (
-    <div className="p-4 md:p-6">
-      <h1 className="text-lg font-semibold text-vloom-text mb-4">KPIs</h1>
-      <div className="bg-vloom-surface border border-vloom-border rounded-lg p-6 text-center text-vloom-muted text-sm">
-        Coming soon
-      </div>
-    </div>
-  );
-}
