@@ -12,7 +12,6 @@ export interface CreatePersonaInput {
   job_title_keywords?: string[];
   locations?: string[];
   max_items?: number | null;
-  profile_scraper_mode?: string | null;
   is_active?: boolean;
 }
 
@@ -82,7 +81,7 @@ export function usePersonas(): UsePersonasReturn {
       job_title_keywords: input.job_title_keywords ?? [],
       locations: input.locations ?? [],
       max_items: input.max_items ?? null,
-      profile_scraper_mode: input.profile_scraper_mode ?? null,
+      profile_scraper_mode: 'Full + email search',
       is_active: input.is_active ?? true,
     };
     const { data, error: insertErr } = await supabase.from('personas').insert(row as never).select('*').single();

@@ -4,17 +4,68 @@
 // Target profiles for people enrichment (harvestapi/linkedin-company-employees).
 // Company URL is taken from each lead record at enrichment time.
 
-import { useState, useCallback } from 'react';
-import { Target, Plus, Pencil, Trash2, X, Loader2 } from 'lucide-react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { Target, Plus, Pencil, Trash2, X, Loader2, ChevronDown } from 'lucide-react';
 import { usePersonas, type CreatePersonaInput, type UpdatePersonaInput } from '@/hooks/usePersonas';
 import type { Persona } from '@/types/database';
-import type { ProfileScraperMode } from '@/types/database';
 
-const PROFILE_SCRAPER_OPTIONS: { value: ProfileScraperMode | ''; label: string }[] = [
-  { value: '', label: 'Default' },
-  { value: 'Short', label: 'Short ($4 per 1k)' },
-  { value: 'Full', label: 'Full ($8 per 1k)' },
-  { value: 'Full + email search', label: 'Full + email search ($12 per 1k)' },
+const FUNCTION_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: '— Any —' },
+  { value: 'HR', label: 'HR' },
+  { value: 'Engineering', label: 'Engineering' },
+  { value: 'Marketing', label: 'Marketing' },
+  { value: 'Sales', label: 'Sales' },
+  { value: 'Finance', label: 'Finance' },
+  { value: 'Operations', label: 'Operations' },
+  { value: 'Product', label: 'Product' },
+  { value: 'Design', label: 'Design' },
+  { value: 'Customer Success', label: 'Customer Success' },
+  { value: 'Legal', label: 'Legal' },
+  { value: 'Executive', label: 'Executive' },
+];
+
+const SENIORITY_OPTIONS: { value: string; label: string }[] = [
+  { value: 'Intern', label: 'Intern' },
+  { value: 'Entry-level', label: 'Entry-level' },
+  { value: 'Individual Contributor', label: 'Individual Contributor' },
+  { value: 'Senior', label: 'Senior' },
+  { value: 'Lead', label: 'Lead' },
+  { value: 'Manager', label: 'Manager' },
+  { value: 'Senior Manager', label: 'Senior Manager' },
+  { value: 'Director', label: 'Director' },
+  { value: 'VP', label: 'VP' },
+  { value: 'C-level', label: 'C-level' },
+];
+
+const LOCATION_OPTIONS = [
+  'United States',
+  'Canada',
+  'Remote',
+  'United Kingdom',
+  'Germany',
+  'France',
+  'Spain',
+  'Italy',
+  'Netherlands',
+  'Belgium',
+  'Ireland',
+  'Portugal',
+  'Switzerland',
+  'Austria',
+  'Sweden',
+  'Norway',
+  'Denmark',
+  'Finland',
+  'Poland',
+  'Czech Republic',
+  'Mexico',
+  'Brazil',
+  'Argentina',
+  'Colombia',
+  'Australia',
+  'India',
+  'Singapore',
+  'Japan',
 ];
 
 function parseCommaList(s: string): string[] {
@@ -22,6 +73,102 @@ function parseCommaList(s: string): string[] {
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean);
+}
+
+function LocationsMultiSelect({
+  options,
+  value,
+  onChange,
+  placeholder,
+  className,
+}: {
+  options: { value: string; label: string }[];
+  value: string[];
+  onChange: (selected: string[]) => void;
+  placeholder: string;
+  className: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) {
+      document.addEventListener('mousedown', onOutside);
+      return () => document.removeEventListener('mousedown', onOutside);
+    }
+  }, [open]);
+
+  const toggle = (optValue: string) => {
+    if (value.includes(optValue)) {
+      onChange(value.filter((v) => v !== optValue));
+    } else {
+      onChange([...value, optValue]);
+    }
+  };
+
+  const remove = (optValue: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChange(value.filter((v) => v !== optValue));
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`${className} flex items-center justify-between gap-2 text-left min-h-[42px] cursor-pointer border border-vloom-border rounded-lg px-3 py-2 text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent`}
+      >
+        <span className="flex-1 flex flex-wrap gap-1.5">
+          {value.length === 0 ? (
+            <span className="text-vloom-muted">{placeholder}</span>
+          ) : (
+            value.map((v) => (
+              <span
+                key={v}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-vloom-accent/15 text-vloom-accent text-sm"
+              >
+                {v}
+                <button
+                  type="button"
+                  onClick={(e) => remove(v, e)}
+                  className="hover:bg-vloom-accent/25 rounded p-0.5"
+                  aria-label={`Remove ${v}`}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </span>
+            ))
+          )}
+        </span>
+        <ChevronDown
+          className={`w-5 h-5 text-vloom-muted flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full rounded-xl border border-vloom-border bg-vloom-surface shadow-lg max-h-64 overflow-y-auto">
+          <div className="p-2">
+            {options.map((opt) => (
+              <label
+                key={opt.value}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-vloom-border/30 cursor-pointer text-sm text-vloom-text"
+              >
+                <input
+                  type="checkbox"
+                  checked={value.includes(opt.value)}
+                  onChange={() => toggle(opt.value)}
+                  className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent/50"
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface PersonaFormModalProps {
@@ -35,16 +182,15 @@ function PersonaFormModal({ persona, onClose, onCreate, onUpdate }: PersonaFormM
   const isEdit = persona !== null;
   const [name, setName] = useState(persona?.name ?? '');
   const [persona_function, setPersona_function] = useState(persona?.persona_function ?? '');
-  const [seniority, setSeniority] = useState(persona?.seniority ?? '');
+  const [seniorities, setSeniorities] = useState<string[]>(() =>
+    persona?.seniority ? parseCommaList(persona.seniority) : []
+  );
   const [jobTitleKeywordsText, setJobTitleKeywordsText] = useState(
     (persona?.job_title_keywords ?? []).join(', ')
   );
-  const [locationsText, setLocationsText] = useState((persona?.locations ?? []).join(', '));
+  const [locations, setLocations] = useState<string[]>(persona?.locations ?? []);
   const [max_items, setMax_items] = useState(
     persona?.max_items != null ? String(persona.max_items) : ''
-  );
-  const [profile_scraper_mode, setProfile_scraper_mode] = useState<string>(
-    persona?.profile_scraper_mode ?? ''
   );
   const [is_active, setIs_active] = useState(persona?.is_active ?? true);
   const [submitting, setSubmitting] = useState(false);
@@ -57,7 +203,6 @@ function PersonaFormModal({ persona, onClose, onCreate, onUpdate }: PersonaFormM
       setSubmitting(true);
       try {
         const job_title_keywords = parseCommaList(jobTitleKeywordsText);
-        const locations = parseCommaList(locationsText);
         const maxStr = String(max_items).trim();
         const maxItemsNum = maxStr ? parseInt(maxStr, 10) : null;
         if (maxStr && (isNaN(maxItemsNum!) || maxItemsNum! < 0)) {
@@ -69,22 +214,20 @@ function PersonaFormModal({ persona, onClose, onCreate, onUpdate }: PersonaFormM
           await onUpdate(persona.id, {
             name: name.trim(),
             persona_function: persona_function.trim() || null,
-            seniority: seniority.trim() || null,
+            seniority: seniorities.length ? seniorities.join(', ') : null,
             job_title_keywords,
-            locations,
+            locations: locations,
             max_items: maxItemsNum ?? null,
-            profile_scraper_mode: profile_scraper_mode.trim() || null,
             is_active,
           });
         } else {
           await onCreate({
             name: name.trim(),
             persona_function: persona_function.trim() || null,
-            seniority: seniority.trim() || null,
+            seniority: seniorities.length ? seniorities.join(', ') : null,
             job_title_keywords,
-            locations,
+            locations: locations,
             max_items: maxItemsNum ?? null,
-            profile_scraper_mode: profile_scraper_mode.trim() || null,
             is_active,
           });
         }
@@ -100,11 +243,10 @@ function PersonaFormModal({ persona, onClose, onCreate, onUpdate }: PersonaFormM
       persona,
       name,
       persona_function,
-      seniority,
+      seniorities,
       jobTitleKeywordsText,
-      locationsText,
+      locations,
       max_items,
-      profile_scraper_mode,
       is_active,
       onCreate,
       onUpdate,
@@ -151,26 +293,41 @@ function PersonaFormModal({ persona, onClose, onCreate, onUpdate }: PersonaFormM
           </div>
           <div>
             <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-              Function (e.g. HR, Engineering)
+              Function
             </label>
-            <input
-              type="text"
+            <select
               value={persona_function}
               onChange={(e) => setPersona_function(e.target.value)}
-              placeholder="HR, Engineering, Marketing"
               className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
-            />
+            >
+              {[
+                ...FUNCTION_OPTIONS,
+                ...(persona_function &&
+                !FUNCTION_OPTIONS.some((o) => o.value === persona_function)
+                  ? [{ value: persona_function, label: persona_function }]
+                  : []),
+              ].map((opt) => (
+                <option key={opt.value || 'any'} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-              Seniority (e.g. Director, Manager, VP)
+              Seniority (optional)
             </label>
-            <input
-              type="text"
-              value={seniority}
-              onChange={(e) => setSeniority(e.target.value)}
-              placeholder="Director, Manager, Individual Contributor"
-              className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
+            <LocationsMultiSelect
+              options={[
+                ...SENIORITY_OPTIONS,
+                ...seniorities.filter(
+                  (s) => !SENIORITY_OPTIONS.some((o) => o.value === s)
+                ).map((s) => ({ value: s, label: s })),
+              ]}
+              value={seniorities}
+              onChange={setSeniorities}
+              placeholder="Select one or more seniority levels"
+              className="w-full"
             />
           </div>
           <div>
@@ -187,14 +344,14 @@ function PersonaFormModal({ persona, onClose, onCreate, onUpdate }: PersonaFormM
           </div>
           <div>
             <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-              Locations (optional, comma-separated)
+              Locations (optional)
             </label>
-            <input
-              type="text"
-              value={locationsText}
-              onChange={(e) => setLocationsText(e.target.value)}
-              placeholder="New York, London, United Kingdom"
-              className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
+            <LocationsMultiSelect
+              options={LOCATION_OPTIONS.map((loc) => ({ value: loc, label: loc }))}
+              value={locations}
+              onChange={setLocations}
+              placeholder="Select one or more locations"
+              className="w-full"
             />
           </div>
           <div>
@@ -209,22 +366,6 @@ function PersonaFormModal({ persona, onClose, onCreate, onUpdate }: PersonaFormM
               placeholder="e.g. 50"
               className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
             />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
-              Profile scraper mode
-            </label>
-            <select
-              value={profile_scraper_mode}
-              onChange={(e) => setProfile_scraper_mode(e.target.value)}
-              className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
-            >
-              {PROFILE_SCRAPER_OPTIONS.map((opt) => (
-                <option key={opt.value || 'default'} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
           </div>
           <div className="flex items-center gap-2">
             <input
@@ -365,9 +506,6 @@ export function PersonasView() {
                     <span>Locations: {p.locations.join(', ')}</span>
                   )}
                   {p.max_items != null && <span>Max: {p.max_items}</span>}
-                  {p.profile_scraper_mode && (
-                    <span>Mode: {p.profile_scraper_mode}</span>
-                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1">
