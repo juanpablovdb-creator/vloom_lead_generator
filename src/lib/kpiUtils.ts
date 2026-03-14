@@ -1,8 +1,8 @@
 // =====================================================
 // Leadflow Vloom - KPI week and cohort aggregation
 // =====================================================
-// Weeks run Monday–Sunday. "People contacted" is attributed to the week when
-// the lead was moved to invite_sent (CRM). Other metrics use that same cohort.
+// Weeks run Monday–Sunday. "Invite sent" (Companies) is attributed to the week when
+// the lead was moved to invite_sent (CRM). Other metrics use that same cohort (Companies).
 
 import type { Lead, LeadStatus } from '@/types/database';
 
@@ -45,25 +45,21 @@ export function getFirstContactWeekKey(lead: Lead): string {
 }
 
 /**
- * Week key for "People contacted": prefer the week when the lead was first moved to invite_sent (CRM).
- * Falls back to created_at if no invite_sent history (e.g. legacy data or lead not yet moved).
+ * Week key for "Invite sent" cohort: only from lead_status_history (first move to invite_sent).
+ * No fallback: leads without history are not assigned to any week, so counts are accurate.
  */
 export function getPeopleContactedWeekKey(
   lead: Lead,
   firstInviteSentAtByLeadId: Map<string, string> | null
-): string {
-  if (firstInviteSentAtByLeadId) {
-    const at = firstInviteSentAtByLeadId.get(lead.id);
-    if (at) return getWeekKey(parseDate(at));
-  }
-  return getFirstContactWeekKey(lead);
+): string | null {
+  if (!firstInviteSentAtByLeadId) return null;
+  const at = firstInviteSentAtByLeadId.get(lead.id);
+  if (!at) return null;
+  return getWeekKey(parseDate(at));
 }
 
-/** Status ordering for "reached" checks (later stages imply earlier ones). */
-const STATUS_ORDER: LeadStatus[] = [
-  'backlog',
-  'not_contacted',
-  'invite_sent',
+/** Stages we track in history for funnel counts (must have been in this stage at some point). */
+export const FUNNEL_STAGES_FROM_HISTORY: LeadStatus[] = [
   'connected',
   'reply',
   'positive_reply',
@@ -73,12 +69,8 @@ const STATUS_ORDER: LeadStatus[] = [
   'disqualified',
 ];
 
-function hasReachedStatus(lead: Lead, target: LeadStatus): boolean {
-  const current = lead.status as LeadStatus;
-  const idx = STATUS_ORDER.indexOf(current);
-  const targetIdx = STATUS_ORDER.indexOf(target);
-  return idx >= 0 && targetIdx >= 0 && idx >= targetIdx;
-}
+/** Map: lead_id -> set of to_status values that lead has ever had (from lead_status_history). */
+export type StagesEverReachedByLeadId = Map<string, Set<string>>;
 
 export interface WeekKPI {
   weekKey: string;
@@ -111,14 +103,16 @@ export interface KPISnapshot {
 }
 
 /**
- * Build KPI snapshot from leads. "People contacted" is attributed to the week when
- * the lead was first moved to invite_sent (from lead_status_history), or created_at if unknown.
- * Downstream metrics (connected, reply, etc.) use that same cohort.
+ * Build KPI snapshot from leads. Cohort = week of first Invite Sent (from history).
+ * Connected, Reply, Positive reply, etc. count only leads that have that stage in
+ * lead_status_history (ever moved to that stage), not just current status — so
+ * e.g. a lead in Disqualified who never was in Reply is not counted in Replies.
  */
 export function computeKPIsByWeek(
   leads: Lead[],
   numWeeks: number = 12,
-  firstInviteSentAtByLeadId?: Map<string, string> | null
+  firstInviteSentAtByLeadId?: Map<string, string> | null,
+  stagesEverReachedByLeadId?: StagesEverReachedByLeadId | null
 ): KPISnapshot {
   const now = new Date();
   const weekKeysSet = new Set<string>();
@@ -126,6 +120,7 @@ export function computeKPIsByWeek(
 
   for (const lead of leads) {
     const key = getPeopleContactedWeekKey(lead, firstInviteSentAtByLeadId ?? null);
+    if (key === null) continue; // Only count leads that were actually moved to Invite Sent
     weekKeysSet.add(key);
     const list = leadsByWeek.get(key) ?? [];
     list.push(lead);
@@ -141,6 +136,9 @@ export function computeKPIsByWeek(
     orderedKeys.push(key);
   }
 
+  const hasEverBeen = (leadId: string, stage: string): boolean =>
+    stagesEverReachedByLeadId?.get(leadId)?.has(stage) ?? false;
+
   const weeks: WeekKPI[] = orderedKeys.map((weekKey) => {
     const cohort = leadsByWeek.get(weekKey) ?? [];
     const monday = new Date(weekKey + 'T00:00:00');
@@ -148,13 +146,13 @@ export function computeKPIsByWeek(
     sunday.setDate(sunday.getDate() + 6);
 
     const peopleContactedLeads = cohort;
-    const connectedLeads = cohort.filter((l) => hasReachedStatus(l, 'connected'));
-    const repliesLeads = cohort.filter((l) => hasReachedStatus(l, 'reply'));
-    const positiveRepliesLeads = cohort.filter((l) => hasReachedStatus(l, 'positive_reply'));
-    const opportunityLeads = cohort.filter((l) => hasReachedStatus(l, 'negotiation'));
-    const closedLeads = cohort.filter((l) => (l.status as LeadStatus) === 'closed');
-    const lostLeads = cohort.filter((l) => (l.status as LeadStatus) === 'lost');
-    const disqualifiedLeads = cohort.filter((l) => (l.status as LeadStatus) === 'disqualified');
+    const connectedLeads = cohort.filter((l) => hasEverBeen(l.id, 'connected'));
+    const repliesLeads = cohort.filter((l) => hasEverBeen(l.id, 'reply'));
+    const positiveRepliesLeads = cohort.filter((l) => hasEverBeen(l.id, 'positive_reply'));
+    const opportunityLeads = cohort.filter((l) => hasEverBeen(l.id, 'negotiation'));
+    const closedLeads = cohort.filter((l) => hasEverBeen(l.id, 'closed'));
+    const lostLeads = cohort.filter((l) => hasEverBeen(l.id, 'lost'));
+    const disqualifiedLeads = cohort.filter((l) => hasEverBeen(l.id, 'disqualified'));
 
     const weekLabel = `${formatShort(monday)} – ${formatShort(sunday)}`;
 

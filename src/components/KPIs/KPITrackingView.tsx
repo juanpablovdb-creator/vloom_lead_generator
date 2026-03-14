@@ -1,19 +1,36 @@
 // =====================================================
 // Leadflow Vloom - KPI tracking by week (Mon–Sun)
 // =====================================================
-// "People contacted" = week when the lead was moved to invite_sent (CRM).
-// Click a number to see the list of people for that metric.
+// "Invite sent" (Companies) = week when the lead was moved to invite_sent (CRM).
+// All metrics show Companies. Click a number to see the list for that metric.
+// Optional filter by channel to see KPIs per channel.
 
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useLeads } from '@/hooks/useLeads';
-import { computeKPIsByWeek, formatWeekRange, type WeekKPI } from '@/lib/kpiUtils';
+import {
+  computeKPIsByWeek,
+  formatWeekRange,
+  FUNNEL_STAGES_FROM_HISTORY,
+  type StagesEverReachedByLeadId,
+  type WeekKPI,
+} from '@/lib/kpiUtils';
 import { supabase } from '@/lib/supabase';
 import { SUPABASE_CONFIG_HINT } from '@/lib/supabase';
 import type { Lead } from '@/types/database';
 
 const DEFAULT_NUM_WEEKS = 4;
-const MAX_LEADS_FOR_KPI = 5000;
+
+const CHANNEL_OPTIONS = [
+  { value: 'LinkedIn', label: 'LinkedIn' },
+  { value: 'Website', label: 'Website' },
+  { value: 'Referral', label: 'Referral' },
+  { value: 'Event', label: 'Event' },
+  { value: 'Cold outreach', label: 'Cold outreach' },
+  { value: 'Email', label: 'Email' },
+  { value: 'Youtube Jobs', label: 'Youtube Jobs' },
+  { value: 'Other', label: 'Other' },
+];
 
 /** Format count with rate vs denominator: "12 (24.00%)" for funnel rows. */
 function countWithRate(count: number, denominator: number): string {
@@ -165,20 +182,127 @@ function useFirstInviteSentByLead(): Map<string, string> | null {
   return map;
 }
 
+/** For each lead, the set of stages they have ever been in (from lead_status_history). */
+function useStagesEverReachedByLead(): StagesEverReachedByLeadId | null {
+  const [map, setMap] = useState<StagesEverReachedByLeadId | null>(null);
+
+  const fetchHistory = useCallback(async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from('lead_status_history')
+      .select('lead_id, to_status')
+      .in('to_status', [...FUNNEL_STAGES_FROM_HISTORY]);
+    if (error) return;
+    const byLead = new Map<string, Set<string>>();
+    for (const row of (data ?? []) as { lead_id: string; to_status: string }[]) {
+      let set = byLead.get(row.lead_id);
+      if (!set) {
+        set = new Set();
+        byLead.set(row.lead_id, set);
+      }
+      set.add(row.to_status);
+    }
+    setMap(byLead);
+  }, []);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  return map;
+}
+
+const KPI_LEADS_CHUNK = 250;
+
+/** Fetch only leads that have a row in lead_status_history (invite_sent), so cohort week is accurate. */
+function useLeadsForKPI(
+  firstInviteSentByLeadId: Map<string, string> | null,
+  channelFilter: string[] | undefined
+): { leads: Lead[]; isLoading: boolean } {
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!supabase || !firstInviteSentByLeadId) {
+      setLeads([]);
+      return;
+    }
+    const leadIds = Array.from(firstInviteSentByLeadId.keys());
+    if (leadIds.length === 0) {
+      setLeads([]);
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+
+    const run = async () => {
+      const all: Lead[] = [];
+      for (let i = 0; i < leadIds.length; i += KPI_LEADS_CHUNK) {
+        if (cancelled) return;
+        const chunk = leadIds.slice(i, i + KPI_LEADS_CHUNK);
+        let query = supabase
+          .from('leads')
+          .select('*')
+          .in('id', chunk)
+          .eq('is_marked_as_lead', true);
+        if (channelFilter && channelFilter.length > 0) {
+          query = query.in('channel', channelFilter);
+        }
+        const { data, error } = await query;
+        if (error || cancelled) return;
+        all.push(...((data ?? []) as Lead[]));
+      }
+      if (!cancelled) setLeads(all);
+    };
+
+    run().finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [firstInviteSentByLeadId, channelFilter?.join(',') ?? '']);
+
+  return { leads, isLoading };
+}
+
 export function KPITrackingView() {
   const [numWeeks, setNumWeeks] = useState(DEFAULT_NUM_WEEKS);
   const [listPopover, setListPopover] = useState<PopoverState>(null);
+  const [channelOpen, setChannelOpen] = useState(false);
 
-  const { leads, isLoading, error } = useLeads({
-    pageSize: MAX_LEADS_FOR_KPI,
+  const { error, filters, updateFilter } = useLeads({
+    pageSize: 1,
     initialFilters: { marked_as_lead_only: true },
   });
 
+  const selectedChannels = filters.channel ?? [];
+  const channelLabel =
+    selectedChannels.length === 0
+      ? 'All channels'
+      : selectedChannels.length === 1
+        ? selectedChannels[0]
+        : `${selectedChannels.length} channels`;
+
   const firstInviteSentByLeadId = useFirstInviteSentByLead();
+  const stagesEverReachedByLeadId = useStagesEverReachedByLead();
+  const { leads: kpiLeads, isLoading } = useLeadsForKPI(
+    firstInviteSentByLeadId,
+    filters.channel
+  );
 
   const snapshot = useMemo(
-    () => computeKPIsByWeek(leads, numWeeks, firstInviteSentByLeadId),
-    [leads, numWeeks, firstInviteSentByLeadId]
+    () =>
+      computeKPIsByWeek(
+        kpiLeads,
+        numWeeks,
+        firstInviteSentByLeadId,
+        stagesEverReachedByLeadId
+      ),
+    [kpiLeads, numWeeks, firstInviteSentByLeadId, stagesEverReachedByLeadId]
   );
 
   if (error) {
@@ -201,7 +325,71 @@ export function KPITrackingView() {
     <div className="p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
         <h1 className="text-lg font-semibold text-vloom-text">KPI tracking</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Channel filter */}
+          <div className="relative">
+            <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
+              Channel
+            </label>
+            <button
+              type="button"
+              onClick={() => setChannelOpen((o) => !o)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-vloom-border bg-vloom-bg text-vloom-text text-sm min-w-[10rem] justify-between"
+              aria-expanded={channelOpen}
+              aria-haspopup="listbox"
+            >
+              <span>{channelLabel}</span>
+              <ChevronDown className={`w-4 h-4 transition-transform ${channelOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {channelOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  aria-hidden
+                  onClick={() => setChannelOpen(false)}
+                />
+                <ul
+                  role="listbox"
+                  className="absolute left-0 top-full mt-1 z-50 py-1 w-56 rounded-lg border border-vloom-border bg-vloom-surface shadow-lg max-h-60 overflow-y-auto"
+                >
+                  <li role="option">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateFilter('channel', undefined);
+                        setChannelOpen(false);
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm text-vloom-text hover:bg-vloom-accent/10"
+                    >
+                      All channels
+                    </button>
+                  </li>
+                  {CHANNEL_OPTIONS.map((opt) => {
+                    const isSelected = selectedChannels.includes(opt.value);
+                    return (
+                      <li key={opt.value} role="option" aria-selected={isSelected}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = isSelected
+                              ? selectedChannels.filter((c) => c !== opt.value)
+                              : [...selectedChannels, opt.value];
+                            updateFilter('channel', next.length > 0 ? next : undefined);
+                          }}
+                          className="w-full px-3 py-2 text-left text-sm text-vloom-text hover:bg-vloom-accent/10 flex items-center gap-2"
+                        >
+                          <span className="inline-flex w-4 h-4 items-center justify-center rounded border border-vloom-border">
+                            {isSelected ? '✓' : null}
+                          </span>
+                          {opt.label}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
+          </div>
           <label className="flex items-center gap-2 text-sm text-vloom-text">
             <span className="text-vloom-muted">Weeks:</span>
             <select
@@ -220,9 +408,10 @@ export function KPITrackingView() {
       </div>
 
       <p className="text-xs text-vloom-muted mb-4">
-        Funnel: People contacted (week when moved to Invite sent) → Connected → Replies → Positive
-        replies → Opportunity → Closed. Each row shows count and rate vs people contacted. Click a
-        number to see the list of people for that metric and week. Weeks Mon–Sun; only CRM leads.
+        Funnel: Invite sent (week when moved to Invite sent in CRM) → Connected → Reply → Positive
+        reply → Negotiation → Closed. Only leads with a recorded move to Invite Sent are included.
+        Each row shows count and rate vs Invite sent. Click a number to see the list. Use the Channel
+        filter to see KPIs by channel.
       </p>
 
       {listPopover && (
@@ -252,7 +441,7 @@ export function KPITrackingView() {
             </div>
             <ul className="overflow-y-auto px-4 py-2 flex-1 text-sm text-vloom-text divide-y divide-vloom-border">
               {listPopover.leads.length === 0 ? (
-                <li className="py-2 text-vloom-muted">Ninguna persona</li>
+                <li className="py-2 text-vloom-muted">No companies</li>
               ) : (
                 listPopover.leads.map((lead) => (
                   <li key={lead.id} className="py-2">
@@ -265,7 +454,7 @@ export function KPITrackingView() {
         </div>
       )}
 
-      {isLoading ? (
+      {(firstInviteSentByLeadId === null || isLoading) ? (
         <div className="text-sm text-vloom-muted">Loading…</div>
       ) : (
         <div className="flex justify-center">
@@ -283,14 +472,14 @@ export function KPITrackingView() {
             </thead>
             <tbody>
               <KpiRow
-                label="People contacted"
+                label="Invite sent (Companies)"
                 cells={weeks.map((w) => w.peopleContacted)}
                 weeks={weeks}
                 leadKey="peopleContactedLeads"
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Connected (accepted) · rate vs contacted"
+                label="Connected (accepted) · Companies · rate vs Invite sent"
                 cells={weeks.map((w) =>
                   countWithRate(w.connected, w.peopleContacted)
                 )}
@@ -299,7 +488,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Replies · rate vs contacted"
+                label="Replies · Companies · rate vs Invite sent"
                 cells={weeks.map((w) =>
                   countWithRate(w.replies, w.peopleContacted)
                 )}
@@ -308,7 +497,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Positive replies · rate vs contacted"
+                label="Positive replies · Companies · rate vs Invite sent"
                 cells={weeks.map((w) =>
                   countWithRate(w.positiveReplies, w.peopleContacted)
                 )}
@@ -318,7 +507,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Opportunity · rate vs contacted"
+                label="Negotiation (Companies) · rate vs Invite sent"
                 cells={weeks.map((w) =>
                   countWithRate(w.opportunity, w.peopleContacted)
                 )}
@@ -328,7 +517,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Closed (won) · rate vs contacted"
+                label="Closed (won) · Companies · rate vs Invite sent"
                 cells={weeks.map((w) =>
                   countWithRate(w.closed, w.peopleContacted)
                 )}
@@ -338,7 +527,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Lost · rate vs contacted"
+                label="Lost · Companies · rate vs Invite sent"
                 cells={weeks.map((w) =>
                   countWithRate(w.lost, w.peopleContacted)
                 )}
@@ -348,7 +537,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Disqualified · rate vs contacted"
+                label="Disqualified · Companies · rate vs Invite sent"
                 cells={weeks.map((w) =>
                   countWithRate(w.disqualified, w.peopleContacted)
                 )}
@@ -362,10 +551,9 @@ export function KPITrackingView() {
         </div>
       )}
 
-      {!isLoading && leads.length >= MAX_LEADS_FOR_KPI && (
+      {!isLoading && firstInviteSentByLeadId !== null && kpiLeads.length > 0 && (
         <p className="mt-2 text-xs text-vloom-muted">
-          Showing KPIs for the most recent {MAX_LEADS_FOR_KPI} leads. Increase limit in code if
-          needed.
+          Only leads with recorded &quot;Invite Sent&quot; date (from CRM moves). Counts match the pipeline.
         </p>
       )}
     </div>

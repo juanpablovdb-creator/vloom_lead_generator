@@ -60,6 +60,7 @@ Items preparados para la próxima. 40-60% claros.
 
 ## Completado
 
+- [x] KPIs: labels alineados con CRM (Invite sent, Connected · Companies, Negotiation · Companies) + filtro por canal para ver KPIs por canales.
 - [x] KPIs: lista de personas detrás de cada número (click en celda → modal con nombres · compañía).
 - [x] Personas enrichment: Edge Function enrich-lead-personas + botón "Enrich with personas" en CRM; un lead por persona encontrada.
 - [x] Personas tab + API: tabla personas, usePersonas, PersonasView (CRUD), pestaña debajo de Tasks.

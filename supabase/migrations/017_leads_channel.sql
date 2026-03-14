@@ -2,6 +2,7 @@
 -- Leadflow Vloom - Channel field for leads (source/origin of lead)
 -- =====================================================
 -- Allows tracking where each lead came from (LinkedIn, Website, Referral, etc.)
+-- Renumbered from 013 to avoid conflict with schema_migrations version 013.
 
 ALTER TABLE leads
   ADD COLUMN IF NOT EXISTS channel VARCHAR(255);
