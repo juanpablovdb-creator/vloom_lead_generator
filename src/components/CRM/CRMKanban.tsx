@@ -8,7 +8,7 @@ import type { Lead, LeadStatus } from '@/types/database';
 const PIPELINE_STAGES: { id: LeadStatus; label: string }[] = [
   { id: 'backlog', label: 'Backlog' },
   { id: 'not_contacted', label: 'Not contacted' },
-  { id: 'invite_sent', label: 'Invite sent' },
+  { id: 'invite_sent', label: 'First contact' },
   { id: 'connected', label: 'Connected' },
   { id: 'reply', label: 'Reply' },
   { id: 'positive_reply', label: 'Positive reply' },

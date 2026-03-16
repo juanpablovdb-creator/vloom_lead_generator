@@ -1,7 +1,7 @@
 // =====================================================
 // Leadflow Vloom - KPI tracking by week (Mon–Sun)
 // =====================================================
-// "Invite sent" (Companies) = week when the lead was moved to invite_sent (CRM).
+// "First contact" (Companies) = week when the lead was moved to invite_sent (CRM).
 // All metrics show Companies. Click a number to see the list for that metric.
 // Optional filter by channel to see KPIs per channel.
 
@@ -23,6 +23,8 @@ const DEFAULT_NUM_WEEKS = 4;
 
 const CHANNEL_OPTIONS = [
   { value: 'LinkedIn', label: 'LinkedIn' },
+  { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
+  { value: 'LinkedIn Post Feeds', label: 'LinkedIn Post Feeds' },
   { value: 'Website', label: 'Website' },
   { value: 'Referral', label: 'Referral' },
   { value: 'Event', label: 'Event' },
@@ -183,17 +185,24 @@ function useFirstInviteSentByLead(): Map<string, string> | null {
       if (!byLead.has(row.lead_id)) byLead.set(row.lead_id, row.changed_at);
     }
 
-    // Fallback: include leads that are already in the funnel but are missing history
-    // (e.g. moved before the trigger existed). Attribute cohort to updated_at/created_at.
+    // Fallback: include leads that are already in the funnel but are missing history.
+    // Prefer manual first_contacted_at for cohort; else updated_at/created_at.
     const { data: funnelLeads, error: funnelError } = await supabase
       .from('leads')
-      .select('id, created_at, updated_at')
+      .select('id, created_at, updated_at, first_contacted_at')
       .eq('is_marked_as_lead', true)
       .neq('status', 'disqualified')
       .in('status', KPI_COHORT_STATUSES);
     if (!funnelError) {
-      for (const row of (funnelLeads ?? []) as { id: string; created_at: string; updated_at: string }[]) {
-        if (!byLead.has(row.id)) byLead.set(row.id, row.updated_at ?? row.created_at);
+      for (const row of (funnelLeads ?? []) as {
+        id: string;
+        created_at: string;
+        updated_at: string;
+        first_contacted_at: string | null;
+      }[]) {
+        const date = row.first_contacted_at ?? row.updated_at ?? row.created_at;
+        if (row.first_contacted_at) byLead.set(row.id, row.first_contacted_at);
+        else if (!byLead.has(row.id)) byLead.set(row.id, date);
       }
     }
 
@@ -434,9 +443,9 @@ export function KPITrackingView() {
       </div>
 
       <p className="text-xs text-vloom-muted mb-4">
-        Funnel: Invite sent (week when moved to Invite sent in CRM) → Connected → Reply → Positive
-        reply → Negotiation → Closed. Only leads with a recorded move to Invite Sent are included.
-        Each row shows count and rate vs Invite sent. Click a number to see the list. Use the Channel
+        Funnel: First contact (week when moved to First contact in CRM) → Connected → Reply → Positive
+        reply → Negotiation → Closed. Only leads with a recorded move to First contact are included.
+        Each row shows count and rate vs First contact. Click a number to see the list. Use the Channel
         filter to see KPIs by channel.
       </p>
 
@@ -498,14 +507,14 @@ export function KPITrackingView() {
             </thead>
             <tbody>
               <KpiRow
-                label="Invite sent (Companies)"
+                label="First contact (Companies)"
                 cells={weeks.map((w) => w.peopleContacted)}
                 weeks={weeks}
                 leadKey="peopleContactedLeads"
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Connected (accepted) · Companies · rate vs Invite sent"
+                label="Connected (accepted) · Companies · rate vs First contact"
                 cells={weeks.map((w) =>
                   countWithRate(w.connected, w.peopleContacted)
                 )}
@@ -514,7 +523,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Replies · Companies · rate vs Invite sent"
+                label="Replies · Companies · rate vs First contact"
                 cells={weeks.map((w) =>
                   countWithRate(w.replies, w.peopleContacted)
                 )}
@@ -523,7 +532,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Positive replies · Companies · rate vs Invite sent"
+                label="Positive replies · Companies · rate vs First contact"
                 cells={weeks.map((w) =>
                   countWithRate(w.positiveReplies, w.peopleContacted)
                 )}
@@ -533,7 +542,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Negotiation (Companies) · rate vs Invite sent"
+                label="Negotiation (Companies) · rate vs First contact"
                 cells={weeks.map((w) =>
                   countWithRate(w.opportunity, w.peopleContacted)
                 )}
@@ -543,7 +552,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Closed (won) · Companies · rate vs Invite sent"
+                label="Closed (won) · Companies · rate vs First contact"
                 cells={weeks.map((w) =>
                   countWithRate(w.closed, w.peopleContacted)
                 )}
@@ -553,7 +562,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Lost · Companies · rate vs Invite sent"
+                label="Lost · Companies · rate vs First contact"
                 cells={weeks.map((w) =>
                   countWithRate(w.lost, w.peopleContacted)
                 )}
@@ -563,7 +572,7 @@ export function KPITrackingView() {
                 onOpenList={setListPopover}
               />
               <KpiRow
-                label="Disqualified · Companies · rate vs Invite sent"
+                label="Disqualified · Companies · rate vs First contact"
                 cells={weeks.map((w) =>
                   countWithRate(w.disqualified, w.peopleContacted)
                 )}
@@ -579,7 +588,7 @@ export function KPITrackingView() {
 
       {!isLoading && firstInviteSentByLeadId !== null && kpiLeads.length > 0 && (
         <p className="mt-2 text-xs text-vloom-muted">
-          Only leads with recorded &quot;Invite Sent&quot; date (from CRM moves). Counts match the pipeline.
+          Only leads with recorded &quot;First contact&quot; date (from CRM moves). Counts match the pipeline.
         </p>
       )}
     </div>

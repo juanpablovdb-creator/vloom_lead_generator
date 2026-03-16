@@ -847,6 +847,7 @@ export async function saveJobsAsLeads(
       status: 'backlog' as const,
       enrichment_data,
       tags: [],
+      channel: job.source === 'linkedin' ? 'LinkedIn Job Post' : null,
     };
   });
 

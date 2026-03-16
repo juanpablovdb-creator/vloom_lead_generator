@@ -24,6 +24,7 @@ export interface CreateLeadInput {
   notes?: string | null;
   channel?: string | null;
   status?: LeadStatus;
+  first_contacted_at?: string | null;
 }
 
 interface UseLeadsOptions {
@@ -358,7 +359,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       contact_email: data.contact_email ?? null,
       contact_linkedin_url: data.contact_linkedin_url ?? null,
       contact_phone: data.contact_phone ?? null,
-      status: (data.status ?? 'not_contacted') as LeadStatus,
+      status: 'invite_sent' as LeadStatus,
       score: 0,
       score_weights: defaultWeights,
       enrichment_data: {},
@@ -369,6 +370,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       job_external_id: null,
       is_marked_as_lead: true,
       channel: data.channel ?? null,
+      first_contacted_at: data.first_contacted_at ?? new Date().toISOString(),
     };
     const { data: inserted, error: insertError } = await supabase
       .from('leads')
@@ -379,6 +381,13 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     const lead = inserted as Lead;
     setLeads(prev => [lead, ...prev]);
     setTotalCount(prev => prev + 1);
+    // Record invite_sent in history so KPIs count this lead (trigger only fires on UPDATE)
+    await supabase.from('lead_status_history').insert({
+      lead_id: lead.id,
+      from_status: 'not_contacted',
+      to_status: 'invite_sent',
+      changed_at: (data.first_contacted_at ?? new Date().toISOString()),
+    } as never);
     // Create default "Contact ..." task for new manual lead
     const contactLabel = [lead.company_name, lead.contact_name].filter(Boolean).join(' – ') || 'lead';
     await supabase.from('tasks').insert({ user_id: user.id, lead_id: lead.id, title: `Contact ${contactLabel}`, status: 'pending' } as never);

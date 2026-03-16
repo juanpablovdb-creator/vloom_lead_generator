@@ -25,7 +25,7 @@ import { LeadCardPopup } from '@/components/CRM/LeadCardPopup';
 const CRM_STATUS_LABEL: Record<LeadStatus, string> = {
   backlog: 'Backlog',
   not_contacted: 'Not contacted',
-  invite_sent: 'Invite sent',
+  invite_sent: 'First contact',
   connected: 'Connected',
   reply: 'Reply',
   positive_reply: 'Positive reply',

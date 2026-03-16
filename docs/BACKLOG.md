@@ -62,6 +62,7 @@ Items preparados para la próxima. 40-60% claros.
 
 - [x] KPIs: labels alineados con CRM (Invite sent, Connected · Companies, Negotiation · Companies) + filtro por canal para ver KPIs por canales.
 - [x] KPIs: lista de personas detrás de cada número (click en celda → modal con nombres · compañía).
+- [x] CRM: nuevo lead en Invite sent; first_contacted_at; ordenar por fecha / last contacted / first contacted; canales LinkedIn Job Post y LinkedIn Post Feeds; channel LinkedIn en enriquecimiento y LinkedIn Job Post en import.
 - [x] KPIs: cohort y conteos para todos los contactados (migración 018 backfill etapas + fallback por status en kpiUtils).
 - [x] KPIs: excluir Disqualified de todos los conteos (leads no contactados; no cuentan en Invite Sent ni en el funnel).
 - [x] Personas enrichment: Edge Function enrich-lead-personas + botón "Enrich with personas" en CRM; un lead por persona encontrada.

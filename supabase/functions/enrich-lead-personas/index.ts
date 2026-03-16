@@ -343,7 +343,7 @@ Deno.serve(async (req: Request) => {
           scraping_job_id: null,
           job_external_id: null,
           is_marked_as_lead: true,
-          channel: "Persona enrichment",
+          channel: "LinkedIn",
         };
 
         const { data: inserted, error: insertErr } = await supabase

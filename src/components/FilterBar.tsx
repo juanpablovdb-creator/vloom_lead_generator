@@ -30,7 +30,7 @@ interface FilterBarProps {
 const STATUS_OPTIONS: { value: LeadStatus; label: string }[] = [
   { value: 'backlog', label: 'Backlog' },
   { value: 'not_contacted', label: 'Not contacted' },
-  { value: 'invite_sent', label: 'Invite sent' },
+  { value: 'invite_sent', label: 'First contact' },
   { value: 'connected', label: 'Connected' },
   { value: 'reply', label: 'Reply' },
   { value: 'positive_reply', label: 'Positive reply' },
@@ -47,6 +47,8 @@ const SOURCE_OPTIONS = [
 
 const CHANNEL_OPTIONS = [
   { value: 'LinkedIn', label: 'LinkedIn' },
+  { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
+  { value: 'LinkedIn Post Feeds', label: 'LinkedIn Post Feeds' },
   { value: 'Website', label: 'Website' },
   { value: 'Referral', label: 'Referral' },
   { value: 'Event', label: 'Event' },

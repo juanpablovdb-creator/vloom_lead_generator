@@ -16,6 +16,8 @@ import { LeadCardPopup } from './LeadCardPopup';
 
 const CHANNEL_OPTIONS = [
   { value: 'LinkedIn', label: 'LinkedIn' },
+  { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
+  { value: 'LinkedIn Post Feeds', label: 'LinkedIn Post Feeds' },
   { value: 'Website', label: 'Website' },
   { value: 'Referral', label: 'Referral' },
   { value: 'Event', label: 'Event' },
@@ -72,6 +74,7 @@ function AddLeadModal({ onClose, onCreate, onCreated }: AddLeadModalProps) {
   const [contact_email, setContact_email] = useState('');
   const [channel, setChannel] = useState('');
   const [channelOther, setChannelOther] = useState('');
+  const [first_contacted_at, setFirst_contacted_at] = useState('');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +91,7 @@ function AddLeadModal({ onClose, onCreate, onCreated }: AddLeadModalProps) {
         contact_email: contact_email.trim() || null,
         channel: channelValue,
         notes: notes.trim() || null,
+        first_contacted_at: first_contacted_at.trim() ? new Date(first_contacted_at).toISOString() : undefined,
       });
       if (lead) {
         onCreated(lead);
@@ -171,6 +175,16 @@ function AddLeadModal({ onClose, onCreate, onCreated }: AddLeadModalProps) {
                 className="mt-2 w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
               />
             )}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">First contact date (optional)</label>
+            <input
+              type="date"
+              value={first_contacted_at}
+              onChange={(e) => setFirst_contacted_at(e.target.value)}
+              className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
+            />
+            <p className="mt-1 text-xs text-vloom-muted">For past cohorts in KPIs. Leave empty for today.</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Notes (optional)</label>
@@ -387,6 +401,29 @@ export function CRMView() {
               By companies
             </button>
           </div>
+          <label className="flex items-center gap-2 text-sm text-vloom-text">
+            <span className="text-vloom-muted">Sort:</span>
+            <select
+              value={
+                sort.column === 'first_contacted_at'
+                  ? 'first_contacted'
+                  : sort.column === 'updated_at'
+                    ? 'last_contacted'
+                    : 'date_az'
+              }
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === 'date_az') setSort({ column: 'created_at', direction: 'asc' });
+                else if (v === 'last_contacted') setSort({ column: 'updated_at', direction: 'desc' });
+                else setSort({ column: 'first_contacted_at', direction: 'desc' });
+              }}
+              className="px-2 py-1.5 rounded-lg border border-vloom-border bg-vloom-bg text-vloom-text text-sm"
+            >
+              <option value="date_az">Date (A–Z)</option>
+              <option value="last_contacted">Last contacted</option>
+              <option value="first_contacted">First contacted</option>
+            </select>
+          </label>
           <button
             type="button"
             onClick={handleRecomputeScores}

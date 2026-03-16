@@ -14,7 +14,7 @@ import type { TaskStatus } from '@/types/database';
 const CRM_STATUS_LABEL: Record<LeadStatus, string> = {
   backlog: 'Backlog',
   not_contacted: 'Not contacted',
-  invite_sent: 'Invite sent',
+  invite_sent: 'First contact',
   connected: 'Connected',
   reply: 'Reply',
   positive_reply: 'Positive reply',
@@ -377,6 +377,24 @@ export function LeadCardPopup({
                 placeholder="e.g. LinkedIn, Website, Referral"
                 className="w-full max-w-xs rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
               />
+            </div>
+
+            <div>
+              <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">First contact date</div>
+              <input
+                type="date"
+                value={localLead.first_contacted_at ? localLead.first_contacted_at.slice(0, 10) : ''}
+                onChange={(e) => {
+                  const v = e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : null;
+                  setLocalLead({ ...localLead, first_contacted_at: v });
+                }}
+                onBlur={async () => {
+                  const v = localLead.first_contacted_at;
+                  await onUpdateLead(localLead.id, { first_contacted_at: v ?? null });
+                }}
+                className="w-full max-w-xs rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+              />
+              <p className="mt-1 text-xs text-vloom-muted">Used for KPI cohort. Clear to use history/updated date.</p>
             </div>
 
             {localLead.is_marked_as_lead && (

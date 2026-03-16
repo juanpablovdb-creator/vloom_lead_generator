@@ -108,6 +108,9 @@ export interface Lead {
 
   /** Channel where this lead was received (e.g. LinkedIn, Website, Referral). */
   channel: string | null;
+
+  /** Manual first contact date (for KPI cohort); when set, used instead of history/updated_at. */
+  first_contacted_at: string | null;
   
   // Timestamps
   created_at: string;

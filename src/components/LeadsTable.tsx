@@ -71,6 +71,8 @@ const DEFAULT_COLUMNS: TableColumn[] = [
   { key: 'job_posted_at', label: 'Posted at', visible: true, sortable: true },
   { key: 'last_enriched_at', label: 'Enriched', visible: true, sortable: true },
   { key: 'created_at', label: 'Imported', visible: true, sortable: true },
+  { key: 'updated_at', label: 'Last contacted', visible: true, sortable: true },
+  { key: 'first_contacted_at', label: 'First contact', visible: true, sortable: true },
   { key: 'notes', label: 'Notes', visible: false, sortable: false },
 ];
 
@@ -78,7 +80,7 @@ const DEFAULT_COLUMNS: TableColumn[] = [
 const STATUS_CONFIG: Record<LeadStatus, { label: string; className: string }> = {
   backlog: { label: 'Backlog', className: 'bg-vloom-border/50 text-vloom-muted border-vloom-border' },
   not_contacted: { label: 'Not contacted', className: 'bg-vloom-border/50 text-vloom-muted border-vloom-border' },
-  invite_sent: { label: 'Invite sent', className: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
+  invite_sent: { label: 'First contact', className: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
   connected: { label: 'Connected', className: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' },
   reply: { label: 'Reply', className: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
   positive_reply: { label: 'Positive reply', className: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
@@ -711,6 +713,24 @@ export function LeadsTable({
               </span>
             )}
           </div>
+        );
+      }
+
+      case 'updated_at': {
+        const date = lead.updated_at ? new Date(lead.updated_at) : null;
+        return (
+          <span className="text-sm text-vloom-muted">
+            {date ? date.toLocaleDateString(undefined, { dateStyle: 'short' }) : '—'}
+          </span>
+        );
+      }
+
+      case 'first_contacted_at': {
+        const date = lead.first_contacted_at ? new Date(lead.first_contacted_at) : null;
+        return (
+          <span className="text-sm text-vloom-muted">
+            {date ? date.toLocaleDateString(undefined, { dateStyle: 'short' }) : '—'}
+          </span>
         );
       }
 

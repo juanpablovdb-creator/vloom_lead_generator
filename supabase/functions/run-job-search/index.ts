@@ -517,6 +517,7 @@ Deno.serve(async (req: Request) => {
         score,
         enrichment_data,
         tags: [],
+        channel: "LinkedIn Job Post",
       };
     });
 
