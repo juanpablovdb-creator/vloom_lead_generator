@@ -15,6 +15,32 @@ import { runJobSearchViaEdge, recomputeLeadScores } from '@/lib/apify';
 import { SavedSearchesView } from '@/components/SavedSearchesView';
 import { useLeads } from '@/hooks/useLeads';
 
+const LAST_NAV_KEY = 'leadflow_last_nav';
+
+const SECTIONS: SectionId[] = ['tasks', 'personas', 'discovery', 'crm', 'kpis'];
+const DISCOVERY_SUBS: DiscoverySubId[] = ['new-search', 'saved-searches', 'leads-lists'];
+
+function getLastNav(): { section: SectionId; discoverySub: DiscoverySubId } {
+  try {
+    const raw = localStorage.getItem(LAST_NAV_KEY);
+    if (!raw) return { section: 'discovery', discoverySub: 'new-search' };
+    const parsed = JSON.parse(raw) as { section?: string; discoverySub?: string };
+    const section = SECTIONS.includes(parsed.section as SectionId) ? (parsed.section as SectionId) : 'discovery';
+    const discoverySub = DISCOVERY_SUBS.includes(parsed.discoverySub as DiscoverySubId) ? (parsed.discoverySub as DiscoverySubId) : 'new-search';
+    return { section, discoverySub };
+  } catch {
+    return { section: 'discovery', discoverySub: 'new-search' };
+  }
+}
+
+function setLastNav(section: SectionId, discoverySub: DiscoverySubId) {
+  try {
+    localStorage.setItem(LAST_NAV_KEY, JSON.stringify({ section, discoverySub }));
+  } catch {
+    // ignore
+  }
+}
+
 type View = 'app' | 'search-config';
 
 type LastSearchResult =
@@ -35,21 +61,24 @@ export interface AppContentProps {
   onSignOut?: () => void;
 }
 
+const initialNav = getLastNav();
+
 export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
-  const [section, setSection] = useState<SectionId>('discovery');
-  const [discoverySub, setDiscoverySub] = useState<DiscoverySubId>('new-search');
+  const [section, setSection] = useState<SectionId>(() => initialNav.section);
+  const [discoverySub, setDiscoverySub] = useState<DiscoverySubId>(() => initialNav.discoverySub);
   const [view, setView] = useState<View>('app');
   const [selectedSource, setSelectedSource] = useState<LeadSource | null>(null);
   const [lastSearchResult, setLastSearchResult] = useState<LastSearchResult>(null);
 
   const handleNavigate = useCallback((s: SectionId, sub?: DiscoverySubId) => {
+    const nextSub = s === 'discovery' ? (sub ?? 'new-search') : discoverySub;
     setSection(s);
     if (s === 'discovery') {
-      setDiscoverySub(sub ?? 'new-search');
-      // Show section content (e.g. Saved searches) instead of staying on Search config
+      setDiscoverySub(nextSub);
       setView('app');
     }
-  }, []);
+    setLastNav(s, s === 'discovery' ? nextSub : discoverySub);
+  }, [discoverySub]);
 
   const handleSelectSource = useCallback((source: LeadSource) => {
     setSelectedSource(source);

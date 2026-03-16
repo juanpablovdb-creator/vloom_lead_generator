@@ -27,6 +27,12 @@ const CHANNEL_OPTIONS = [
   { value: 'Other', label: 'Other' },
 ];
 
+/** Parse YYYY-MM-DD (date input) as local noon → ISO for DB (avoids UTC shift). */
+function dateOnlyToISO(dateOnly: string): string {
+  const [y, m, d] = dateOnly.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0, 0).toISOString();
+}
+
 const CRM_PREFS_KEY = 'leadflow_crm_preferences';
 
 type CRMViewMode = 'kanban' | 'table';
@@ -91,7 +97,7 @@ function AddLeadModal({ onClose, onCreate, onCreated }: AddLeadModalProps) {
         contact_email: contact_email.trim() || null,
         channel: channelValue,
         notes: notes.trim() || null,
-        first_contacted_at: first_contacted_at.trim() ? new Date(first_contacted_at).toISOString() : undefined,
+        first_contacted_at: first_contacted_at.trim() ? dateOnlyToISO(first_contacted_at.trim()) : undefined,
       });
       if (lead) {
         onCreated(lead);

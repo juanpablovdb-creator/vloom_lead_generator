@@ -6,6 +6,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { X, ChevronDown, ChevronUp, CheckCircle2, Circle, UserMinus } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { dateOnlyToISO, isoToDateInputValue } from '@/lib/dateUtils';
 import type { Lead, LeadStatus } from '@/types/database';
 import type { LeadStatusHistory } from '@/types/database';
 import type { TaskWithLead } from '@/hooks/useTasks';
@@ -383,9 +384,9 @@ export function LeadCardPopup({
               <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">First contact date</div>
               <input
                 type="date"
-                value={localLead.first_contacted_at ? localLead.first_contacted_at.slice(0, 10) : ''}
+                value={isoToDateInputValue(localLead.first_contacted_at ?? null)}
                 onChange={(e) => {
-                  const v = e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : null;
+                  const v = e.target.value ? dateOnlyToISO(e.target.value) : null;
                   setLocalLead({ ...localLead, first_contacted_at: v });
                 }}
                 onBlur={async () => {
