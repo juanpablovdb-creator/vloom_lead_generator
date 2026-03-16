@@ -223,7 +223,8 @@ function useLeadsForKPI(
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!supabase || !firstInviteSentByLeadId) {
+    const client = supabase;
+    if (!client || !firstInviteSentByLeadId) {
       setLeads([]);
       return;
     }
@@ -242,7 +243,7 @@ function useLeadsForKPI(
       for (let i = 0; i < leadIds.length; i += KPI_LEADS_CHUNK) {
         if (cancelled) return;
         const chunk = leadIds.slice(i, i + KPI_LEADS_CHUNK);
-        let query = supabase
+        let query = client
           .from('leads')
           .select('*')
           .in('id', chunk)
