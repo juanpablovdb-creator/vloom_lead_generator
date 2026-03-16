@@ -62,6 +62,8 @@ Items preparados para la próxima. 40-60% claros.
 
 - [x] KPIs: labels alineados con CRM (Invite sent, Connected · Companies, Negotiation · Companies) + filtro por canal para ver KPIs por canales.
 - [x] KPIs: lista de personas detrás de cada número (click en celda → modal con nombres · compañía).
+- [x] KPIs: cohort y conteos para todos los contactados (migración 018 backfill etapas + fallback por status en kpiUtils).
+- [x] KPIs: excluir Disqualified de todos los conteos (leads no contactados; no cuentan en Invite Sent ni en el funnel).
 - [x] Personas enrichment: Edge Function enrich-lead-personas + botón "Enrich with personas" en CRM; un lead por persona encontrada.
 - [x] Personas tab + API: tabla personas, usePersonas, PersonasView (CRUD), pestaña debajo de Tasks.
 - [x] KPI tracking: tabla por semana (Mon–Sun), atribución al primer contacto del lead, vista KPIs en sidebar

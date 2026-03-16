@@ -17,7 +17,7 @@ import {
 } from '@/lib/kpiUtils';
 import { supabase } from '@/lib/supabase';
 import { SUPABASE_CONFIG_HINT } from '@/lib/supabase';
-import type { Lead } from '@/types/database';
+import type { Lead, LeadStatus } from '@/types/database';
 
 const DEFAULT_NUM_WEEKS = 4;
 
@@ -156,6 +156,16 @@ function WeekColumnHeader({ week }: { week: WeekKPI }) {
   );
 }
 
+const KPI_COHORT_STATUSES: LeadStatus[] = [
+  'invite_sent',
+  'connected',
+  'reply',
+  'positive_reply',
+  'negotiation',
+  'closed',
+  'lost',
+];
+
 /** First time each lead was moved to invite_sent (from lead_status_history). */
 function useFirstInviteSentByLead(): Map<string, string> | null {
   const [map, setMap] = useState<Map<string, string> | null>(null);
@@ -172,6 +182,21 @@ function useFirstInviteSentByLead(): Map<string, string> | null {
     for (const row of (data ?? []) as { lead_id: string; changed_at: string }[]) {
       if (!byLead.has(row.lead_id)) byLead.set(row.lead_id, row.changed_at);
     }
+
+    // Fallback: include leads that are already in the funnel but are missing history
+    // (e.g. moved before the trigger existed). Attribute cohort to updated_at/created_at.
+    const { data: funnelLeads, error: funnelError } = await supabase
+      .from('leads')
+      .select('id, created_at, updated_at')
+      .eq('is_marked_as_lead', true)
+      .neq('status', 'disqualified')
+      .in('status', KPI_COHORT_STATUSES);
+    if (!funnelError) {
+      for (const row of (funnelLeads ?? []) as { id: string; created_at: string; updated_at: string }[]) {
+        if (!byLead.has(row.id)) byLead.set(row.id, row.updated_at ?? row.created_at);
+      }
+    }
+
     setMap(byLead);
   }, []);
 
