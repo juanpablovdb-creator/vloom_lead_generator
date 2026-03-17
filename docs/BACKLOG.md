@@ -45,6 +45,7 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Saved searches: quitar “Save this search” + renombrado inline sin bug de espacio
 - [x] Saved Searches: vista Disqualified + Restore to Backlog (enlace Disqualified / Back to results, mensaje string)
 - [x] CRM: reordenar columnas con drag handle (GripVertical) en lugar de flechas
+- [x] Edge Functions: añadir `verify_jwt = false` en config por función para evitar 401/"Invalid JWT" en gateway tras migraciones de JWT signing keys
 
 ---
 

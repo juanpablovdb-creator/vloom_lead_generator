@@ -34,15 +34,17 @@ Más detalle: `docs/SUPABASE_SCHEMA.md`.
    En la raíz del proyecto:
 
    ```bash
-   npx supabase functions deploy run-job-search --no-verify-jwt
+   npx supabase functions deploy run-job-search
    ```
 
    Para **Send to leads** (Saved Search) si ves "Session expired" aunque refresques, despliega también:
 
    ```bash
-   npx supabase functions deploy enrich-lead-companies --no-verify-jwt
-   npx supabase functions deploy enrich-lead-personas --no-verify-jwt
+   npx supabase functions deploy enrich-lead-companies
+   npx supabase functions deploy enrich-lead-personas
    ```
+
+   > Si aun así ves `Invalid JWT`, tu CLI puede estar ignorando el config de la función. Vuelve a desplegar con `--no-verify-jwt`.
 
    Luego cierra sesión en la app, vuelve a entrar y prueba.
 

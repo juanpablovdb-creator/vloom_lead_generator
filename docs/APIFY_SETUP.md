@@ -61,7 +61,7 @@ If the Apify key is missing or wrong, you’ll see: an error about APIFY_API_TOK
 | 1 | Supabase in .env; user logged in with profile and team_id |
 | 2 | Get Apify API token from apify.com (Settings → API) |
 | 3 | Add secret `APIFY_API_TOKEN` in Supabase → Edge Functions → Secrets |
-| 4 | Deploy: `supabase functions deploy run-job-search --no-verify-jwt` (and set `APIFY_API_TOKEN` in Secrets) |
+| 4 | Deploy: `supabase functions deploy run-job-search` (and set `APIFY_API_TOKEN` in Secrets) |
 | 5 | Run a LinkedIn Jobs search in the app to verify |
 
 The Apify key stays in Edge Function Secrets and is never sent to the browser.
@@ -82,7 +82,7 @@ The app first calls the Edge Function; if that fails (e.g. not deployed or wrong
 
 **Option A – Use the Edge Function (recommended, key stays on server):**
 
-1. From the project root: `supabase functions deploy run-job-search --no-verify-jwt` (ensure the correct project is linked: `supabase link` if needed). The `--no-verify-jwt` flag avoids gateway "Invalid JWT" when the project uses newer auth; the function still validates the user with `getUser(token)`.
+1. From the project root: `supabase functions deploy run-job-search` (ensure the correct project is linked: `supabase link` if needed). This repo includes `verify_jwt = false` in the function config so the gateway won’t reject tokens during JWT signing key migrations; the function still validates the user with `getUser(token)`.
 2. In Supabase Dashboard: **Edge Functions** → **Secrets** → add `APIFY_API_TOKEN` with your Apify API token.
 3. Ensure `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env` point to the **same** Supabase project where the function is deployed.
 
@@ -97,7 +97,9 @@ The app first calls the Edge Function; if that fails (e.g. not deployed or wrong
 The Supabase gateway may reject your JWT (e.g. with newer JWT signing). Deploy the function **without** gateway JWT verification; the function still checks the user with `getUser(token)`:
 
 ```bash
-supabase functions deploy run-job-search --no-verify-jwt
+supabase functions deploy run-job-search
 ```
+
+If your Supabase CLI ignores the function config, deploy with `--no-verify-jwt`.
 
 Then run the search again (sign in again if needed).

@@ -328,13 +328,17 @@ function SavedSearchResultsTable({
           {isSessionError && (
             <p className="text-xs opacity-90">
               If refreshing does not fix it, the Supabase gateway may be rejecting the token. Redeploy the enrichment
-              functions with JWT verification disabled:{' '}
+              functions (this repo includes `verify_jwt = false` in their function config):{' '}
               <code className="bg-black/10 dark:bg-white/10 px-1 rounded block mt-1">
-                npx supabase functions deploy enrich-lead-companies --no-verify-jwt
+                npx supabase functions deploy enrich-lead-companies
               </code>
               <code className="bg-black/10 dark:bg-white/10 px-1 rounded block mt-0.5">
-                npx supabase functions deploy enrich-lead-personas --no-verify-jwt
+                npx supabase functions deploy enrich-lead-personas
               </code>
+              <span className="block mt-1">
+                If you still see <code className="bg-black/10 dark:bg-white/10 px-1 rounded">Invalid JWT</code>, deploy
+                with <code className="bg-black/10 dark:bg-white/10 px-1 rounded">--no-verify-jwt</code>.
+              </span>
             </p>
           )}
         </div>

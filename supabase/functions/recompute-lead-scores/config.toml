@@ -1,0 +1,5 @@
+# Supabase Edge Function configuration
+# We validate the user inside the function via `supabase.auth.getUser(jwt)`,
+# but disable gateway JWT verification to avoid "Invalid JWT" during auth key migrations.
+verify_jwt = false
+

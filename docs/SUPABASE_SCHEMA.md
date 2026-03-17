@@ -62,15 +62,17 @@ Si ya subiste "Access token expiry time" en **Project Settings → JWT Keys** y 
 **Solución:** desplegar la Edge Function sin verificación JWT en el gateway (la función sigue validando el token por dentro):
 
 ```bash
-npx supabase functions deploy run-job-search --no-verify-jwt
+npx supabase functions deploy run-job-search
 ```
 
 Para **Send to leads** desde Saved Search (401 / "Session expired" aunque refresques):
 
 ```bash
-npx supabase functions deploy enrich-lead-companies --no-verify-jwt
-npx supabase functions deploy enrich-lead-personas --no-verify-jwt
+npx supabase functions deploy enrich-lead-companies
+npx supabase functions deploy enrich-lead-personas
 ```
+
+> Nota: este repo incluye `verify_jwt = false` en `supabase/functions/*/config.toml`. Si tu Supabase CLI no lo respeta, usa `--no-verify-jwt`.
 
 Luego cierra sesión en la app, vuelve a entrar y prueba.
 
