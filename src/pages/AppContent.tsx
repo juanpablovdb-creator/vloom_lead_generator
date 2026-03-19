@@ -11,7 +11,7 @@ import { KPITrackingView } from '@/components/KPIs/KPITrackingView';
 import { TasksView } from '@/components/TasksView';
 import { PersonasView } from '@/components/PersonasView';
 import { LeadsTable } from '@/components/LeadsTable';
-import { runJobSearchViaEdge, recomputeLeadScores } from '@/lib/apify';
+import { runJobSearchViaEdge, runLinkedInPostFeedViaEdge, recomputeLeadScores } from '@/lib/apify';
 import { SavedSearchesView } from '@/components/SavedSearchesView';
 import { useLeads } from '@/hooks/useLeads';
 
@@ -93,10 +93,10 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
 
   const handleSearch = useCallback(async (source: LeadSource, params: Record<string, unknown>) => {
     try {
-      const result = await runJobSearchViaEdge({
-        actorId: source.apifyActorId,
-        input: params,
-      });
+      const result =
+        source.apifyActorId === 'harvestapi/linkedin-post-search'
+          ? await runLinkedInPostFeedViaEdge({ input: params })
+          : await runJobSearchViaEdge({ actorId: source.apifyActorId, input: params });
       setLastSearchResult({
         ok: true,
         scrapingJobId: result.scrapingJobId,

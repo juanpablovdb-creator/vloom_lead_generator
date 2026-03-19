@@ -44,7 +44,9 @@ export function AuthPage() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin,
+          // Para debugging/local: fuerza el redirect a localhost para evitar que
+          // si la sesión/origen quedó "contaminado" por producción vuelva a vercel.
+          redirectTo: import.meta.env.DEV ? `http://localhost:5173` : `${window.location.origin}${window.location.pathname}`,
           queryParams: { prompt: 'select_account' },
         },
       });

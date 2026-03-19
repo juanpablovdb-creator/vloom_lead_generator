@@ -36,7 +36,7 @@ import { supabase } from '@/lib/supabase';
 interface ActorInputField {
   key: string;
   label: string;
-  type: 'text' | 'select' | 'number' | 'location' | 'locations';
+  type: 'text' | 'textarea' | 'select' | 'number' | 'location' | 'locations';
   placeholder?: string;
   required?: boolean;
   options?: { value: string; label: string }[];
@@ -248,6 +248,85 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       helpText:
         'Optional. Comma-separated list of company website domains to skip (e.g. staffing or recruiting agencies).',
       icon: <Briefcase className="w-4 h-4" />,
+    },
+  ],
+
+  // HarvestAPI LinkedIn Post Search (No Cookies) - harvestapi/linkedin-post-search
+  // Docs: https://apify.com/harvestapi/linkedin-post-search
+  'harvestapi/linkedin-post-search': [
+    {
+      key: 'searchQueries',
+      label: 'Keywords / Search queries',
+      type: 'textarea',
+      placeholder: 'e.g.\ncrm para inmobiliarias\n"lead generation" software\nmarketing automation AND B2B',
+      required: true,
+      helpText: 'One query per line. These are the same queries you would type in LinkedIn post search.',
+      icon: <Search className="w-4 h-4" />,
+    },
+    {
+      key: 'authorLocations',
+      label: 'Author location contains (optional)',
+      type: 'locations',
+      required: false,
+      helpText:
+        "Optional post-filter. We'll keep only posts where the actor output includes an author location that matches one of these locations.",
+      icon: <MapPin className="w-4 h-4" />,
+      options: LOCATION_OPTIONS.map((loc) => ({ value: loc, label: loc })),
+    },
+    {
+      key: 'postedLimit',
+      label: 'Posted limit',
+      type: 'select',
+      options: [
+        { value: 'any', label: 'Any time' },
+        { value: '1h', label: 'Past 1 hour' },
+        { value: '24h', label: 'Past 24 hours' },
+        { value: 'week', label: 'Past week' },
+        { value: 'month', label: 'Past month' },
+        { value: '3months', label: 'Past 3 months' },
+        { value: '6months', label: 'Past 6 months' },
+        { value: 'year', label: 'Past year' },
+      ],
+      defaultValue: 'week',
+      helpText: 'Only posts within this time window. Use shorter windows to save credits when testing.',
+      icon: <Clock className="w-4 h-4" />,
+    },
+    {
+      key: 'maxPosts',
+      label: 'Max posts per query',
+      type: 'number',
+      placeholder: '200',
+      defaultValue: 200,
+      helpText: 'Maximum number of posts to scrape per query. More posts = higher cost.',
+      icon: <Hash className="w-4 h-4" />,
+    },
+    {
+      key: 'sortBy',
+      label: 'Sort by',
+      type: 'select',
+      options: [
+        { value: 'date', label: 'Most recent' },
+        { value: 'relevance', label: 'Relevance' },
+      ],
+      defaultValue: 'date',
+      icon: <Filter className="w-4 h-4" />,
+    },
+    {
+      key: 'contentType',
+      label: 'Content type',
+      type: 'select',
+      options: [
+        { value: 'all', label: 'All' },
+        { value: 'videos', label: 'Videos' },
+        { value: 'images', label: 'Images' },
+        { value: 'documents', label: 'Documents' },
+        { value: 'live_videos', label: 'Live videos' },
+        { value: 'jobs', label: 'Jobs posts' },
+        { value: 'collaborative_articles', label: 'Collaborative articles' },
+      ],
+      defaultValue: 'all',
+      helpText: 'Optional filter. Keep “All” for broad discovery.',
+      icon: <Filter className="w-4 h-4" />,
     },
   ],
 
@@ -672,6 +751,14 @@ export function SearchConfigPage({
                 </option>
               ))}
             </select>
+          ) : field.type === 'textarea' ? (
+            <textarea
+              value={value as string}
+              onChange={(e) => handleChange(field.key, e.target.value)}
+              placeholder={field.placeholder}
+              rows={4}
+              className={`${baseInputClass} resize-y min-h-[96px] leading-relaxed`}
+            />
           ) : field.type === 'locations' ? (
             <LocationsMultiSelect
               options={field.options ?? []}

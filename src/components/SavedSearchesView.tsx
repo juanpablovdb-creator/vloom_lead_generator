@@ -6,13 +6,14 @@ import { Play, Loader2, Trash2, ArrowLeft, List, Pencil, Check, X } from 'lucide
 import { useSavedSearches } from '@/hooks/useSavedSearches';
 import { useLeads } from '@/hooks/useLeads';
 import { LeadsTable } from '@/components/LeadsTable';
-import { runJobSearchViaEdge, sendSelectedToLeadsAndEnrich, recomputeLeadScores } from '@/lib/apify';
+import { runJobSearchViaEdge, runLinkedInPostFeedViaEdge, sendSelectedToLeadsAndEnrich, recomputeLeadScores } from '@/lib/apify';
 import type { RunLinkedInSearchResult } from '@/lib/apify';
 import type { LeadStatus } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { Send } from 'lucide-react';
 
 const LINKEDIN_ACTOR_ID = 'harvestapi/linkedin-job-search';
+const LINKEDIN_POST_FEED_ACTOR_ID = 'harvestapi/linkedin-post-search';
 const NON_DISQUALIFIED_STATUSES: LeadStatus[] = [
   'backlog',
   'not_contacted',
@@ -446,7 +447,10 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
     async (id: string, actorId: string) => {
       setRunningId(id);
       try {
-        const result = await runJobSearchViaEdge({ actorId, savedSearchId: id });
+        const result =
+          actorId === LINKEDIN_POST_FEED_ACTOR_ID
+            ? await runLinkedInPostFeedViaEdge({ savedSearchId: id })
+            : await runJobSearchViaEdge({ actorId, savedSearchId: id });
         onRunComplete(result);
       } catch (err) {
         onRunError(err instanceof Error ? err.message : String(err));
@@ -457,14 +461,18 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
     [onRunComplete, onRunError]
   );
 
-  const linkedInSearches = savedSearches.filter((s) => s.actor_id === LINKEDIN_ACTOR_ID);
-  const otherSearches = savedSearches.filter((s) => s.actor_id !== LINKEDIN_ACTOR_ID);
+  const supportedSearches = savedSearches.filter(
+    (s) => s.actor_id === LINKEDIN_ACTOR_ID || s.actor_id === LINKEDIN_POST_FEED_ACTOR_ID
+  );
+  const otherSearches = savedSearches.filter(
+    (s) => s.actor_id !== LINKEDIN_ACTOR_ID && s.actor_id !== LINKEDIN_POST_FEED_ACTOR_ID
+  );
 
   return (
     <div className="p-4 md:p-6">
       <h1 className="text-lg font-semibold text-vloom-text mb-4">Saved searches</h1>
       <p className="text-sm text-vloom-muted mb-4">
-        Re-run a saved search with one click. Only LinkedIn Jobs (HarvestAPI) runs are supported for now.
+        Re-run a saved search with one click. Supported: LinkedIn Jobs and LinkedIn Post Feeds (HarvestAPI).
       </p>
 
       {!supabase && (
@@ -479,7 +487,7 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
 
       {viewingSearchId ? (
         (() => {
-          const viewing = linkedInSearches.find((s) => s.id === viewingSearchId) ?? otherSearches.find((s) => s.id === viewingSearchId);
+          const viewing = supportedSearches.find((s) => s.id === viewingSearchId) ?? otherSearches.find((s) => s.id === viewingSearchId);
           if (!viewing) return null;
           return (
             <SavedSearchResultsTable
@@ -494,16 +502,20 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading saved searches...
         </div>
-      ) : linkedInSearches.length === 0 && otherSearches.length === 0 ? (
+      ) : supportedSearches.length === 0 && otherSearches.length === 0 ? (
         <div className="bg-vloom-surface border border-vloom-border rounded-lg p-6 text-center text-vloom-muted text-sm">
           No saved searches yet. Run a search from New Search and it will be saved for later.
         </div>
       ) : (
         <ul className="space-y-2">
-          {linkedInSearches.map((s) => {
+          {supportedSearches.map((s) => {
             const jobTitles = (s.input?.jobTitles as string[] | string) ?? [];
-            const summary =
+            const searchQueries = (s.input?.searchQueries as string[] | string) ?? [];
+            const summaryFromJobTitles =
               Array.isArray(jobTitles) ? jobTitles.join(', ') : typeof jobTitles === 'string' ? jobTitles : '';
+            const summaryFromQueries =
+              Array.isArray(searchQueries) ? searchQueries.join(', ') : typeof searchQueries === 'string' ? searchQueries : '';
+            const summary = summaryFromJobTitles || summaryFromQueries;
             const isRunning = runningId === s.id;
             const isEditing = editingSearchId === s.id;
             return (
@@ -575,7 +587,9 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
                         <List className="w-4 h-4 flex-shrink-0 text-vloom-muted" />
                         {s.name}
                       </p>
-                      <p className="text-sm text-vloom-muted truncate mt-0.5">{summary || 'LinkedIn Jobs'}</p>
+                      <p className="text-sm text-vloom-muted truncate mt-0.5">
+                        {summary || (s.actor_id === LINKEDIN_POST_FEED_ACTOR_ID ? 'LinkedIn Post Feeds' : 'LinkedIn Jobs')}
+                      </p>
                     </button>
                   )}
                 </div>

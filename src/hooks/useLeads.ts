@@ -259,6 +259,25 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       setTotalCount(count || 0);
       setPagination(prev => ({ ...prev, total: count || 0 }));
     } catch (err) {
+      const rawMessage =
+        err instanceof Error
+          ? err.message
+          : typeof (err as { message?: string })?.message === 'string'
+            ? (err as { message: string }).message
+            : '';
+
+      // Recoverable: DB schema missing `first_contacted_at` but UI tries to sort by it.
+      // Fall back to a safe sort so CRM doesn't hard-fail.
+      if (
+        sort.column === 'first_contacted_at' &&
+        /first_contacted_at/i.test(rawMessage) &&
+        /does not exist|unknown column|column/i.test(rawMessage)
+      ) {
+        console.warn('Missing leads.first_contacted_at; falling back to updated_at sort.', err);
+        setSort({ column: 'updated_at', direction: 'desc' });
+        return;
+      }
+
       const message =
         err instanceof Error
           ? err.message
@@ -270,7 +289,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [buildQuery, filters.saved_search_id]);
+  }, [buildQuery, filters.saved_search_id, sort.column]);
 
   // Initial fetch and refetch on filter/sort/pagination changes
   useEffect(() => {
@@ -327,6 +346,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
   // CRUD operations (no-op when Supabase not configured)
   const createLead = useCallback(async (data: CreateLeadInput): Promise<Lead | null> => {
     if (!supabase) return null;
+    const db = supabase;
     const user = await getCurrentUser();
     if (!user) return null;
     const defaultWeights = {
@@ -372,17 +392,35 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       channel: data.channel ?? null,
       first_contacted_at: data.first_contacted_at ?? new Date().toISOString(),
     };
-    const { data: inserted, error: insertError } = await supabase
-      .from('leads')
-      .insert(row as never)
-      .select()
-      .single();
-    if (insertError) throw insertError;
+
+    // If the DB is missing `first_contacted_at` (migration not applied yet), retry without it.
+    const insertOnce = async (payload: Record<string, unknown>) =>
+      db.from('leads').insert(payload as never).select().single();
+
+    let inserted: unknown;
+    let insertError: { message?: string } | null = null;
+    {
+      const res = await insertOnce(row as unknown as Record<string, unknown>);
+      inserted = res.data;
+      insertError = (res.error ?? null) as unknown as { message?: string } | null;
+    }
+    if (insertError) {
+      const msg = insertError?.message ?? '';
+      if (/first_contacted_at/i.test(msg) && /does not exist|unknown column|column/i.test(msg)) {
+        const { first_contacted_at: _omit, ...rowWithout } = row as unknown as Record<string, unknown>;
+        const res2 = await insertOnce(rowWithout);
+        if (res2.error) throw res2.error;
+        inserted = res2.data;
+      } else {
+        throw insertError as unknown as Error;
+      }
+    }
+
     const lead = inserted as Lead;
     setLeads(prev => [lead, ...prev]);
     setTotalCount(prev => prev + 1);
     // Record invite_sent in history so KPIs count this lead (trigger only fires on UPDATE)
-    await supabase.from('lead_status_history').insert({
+    await db.from('lead_status_history').insert({
       lead_id: lead.id,
       from_status: 'not_contacted',
       to_status: 'invite_sent',
@@ -390,7 +428,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     } as never);
     // Create default "Contact ..." task for new manual lead
     const contactLabel = [lead.company_name, lead.contact_name].filter(Boolean).join(' – ') || 'lead';
-    await supabase.from('tasks').insert({ user_id: user.id, lead_id: lead.id, title: `Contact ${contactLabel}`, status: 'pending' } as never);
+    await db.from('tasks').insert({ user_id: user.id, lead_id: lead.id, title: `Contact ${contactLabel}`, status: 'pending' } as never);
     return lead;
   }, []);
 

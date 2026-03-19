@@ -10,6 +10,7 @@ import {
   Users,
   ArrowRight,
   Globe,
+  Rss,
 } from 'lucide-react';
 
 interface LeadSource {
@@ -34,6 +35,16 @@ const LEAD_SOURCES: LeadSource[] = [
     bgColor: 'bg-[#0A66C2]/10',
     borderColor: 'border-vloom-border hover:border-vloom-accent/50',
     apifyActorId: 'harvestapi/linkedin-job-search',
+  },
+  {
+    id: 'linkedin-post-feeds',
+    name: 'LinkedIn Post Feeds',
+    description: 'Find companies and decision makers from LinkedIn posts by keywords',
+    icon: <Rss className="w-8 h-8" />,
+    color: 'text-[#0A66C2]',
+    bgColor: 'bg-[#0A66C2]/10',
+    borderColor: 'border-vloom-border hover:border-vloom-accent/50',
+    apifyActorId: 'harvestapi/linkedin-post-search',
   },
   {
     id: 'indeed-jobs',

@@ -46,6 +46,9 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Saved Searches: vista Disqualified + Restore to Backlog (enlace Disqualified / Back to results, mensaje string)
 - [x] CRM: reordenar columnas con drag handle (GripVertical) en lugar de flechas
 - [x] Edge Functions: añadir `verify_jwt = false` en config por función para evitar 401/"Invalid JWT" en gateway tras migraciones de JWT signing keys
+- [x] LinkedIn Post Feeds: ejecutar `harvestapi/linkedin-post-search` y soportar Saved Searches → seleccionar → Send to leads
+- [x] Post Feeds: filtro `authorLocations` aplica ubicacion del autor vía `harvestapi/linkedin-profile-scraper`
+- [x] Post Feeds: normalizar `postedAt` del actor para evitar `"[object Object]"` en `job_posted_at` (timestamp)
 
 ---
 

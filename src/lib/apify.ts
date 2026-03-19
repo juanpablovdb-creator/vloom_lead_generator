@@ -27,6 +27,21 @@ export interface RunLinkedInSearchResult {
   savedSearchName?: string | null;
 }
 
+/** Params for running LinkedIn post feed search (HarvestAPI). From New Search form or saved_searches.input */
+export interface RunLinkedInPostFeedInput {
+  searchQueries: string[];
+  maxPosts?: number;
+  postedLimit?: 'any' | '1h' | '24h' | 'week' | 'month' | '3months' | '6months' | 'year';
+  sortBy?: 'relevance' | 'date';
+  contentType?: 'all' | 'videos' | 'images' | 'jobs' | 'live_videos' | 'documents' | 'collaborative_articles';
+  authorUrls?: string[];
+  authorsCompanies?: string[];
+  mentioningMember?: string[];
+  mentioningCompany?: string[];
+  authorKeywords?: string;
+  [key: string]: unknown;
+}
+
 /**
  * Run job search via Edge Function (API key stays in Edge Function Secrets).
  * Uses fetch so we can always read the response body and show the real error on non-2xx.
@@ -143,6 +158,100 @@ export async function runJobSearchViaEdge(options: {
   }
   if (body?.error) throw new Error(toErrorString(body.error));
   if (body?.scrapingJobId == null) throw new Error('Invalid response from run-job-search.');
+  return {
+    scrapingJobId: body.scrapingJobId,
+    imported: body.imported ?? 0,
+    skipped: body.skipped ?? 0,
+    totalFromApify: body.totalFromApify ?? 0,
+    savedSearchId: body.savedSearchId ?? null,
+    savedSearchName: body.savedSearchName ?? null,
+  };
+}
+
+/**
+ * Run LinkedIn Post Feed search via Edge Function (API key stays in Edge Function Secrets).
+ * No fallback is provided here (post feed is intended to run server-side only, like saved searches).
+ */
+export async function runLinkedInPostFeedViaEdge(options: {
+  input?: Record<string, unknown>;
+  savedSearchId?: string;
+}): Promise<RunLinkedInSearchResult> {
+  if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
+  const db = supabase;
+  const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/run-linkedin-post-feed`;
+
+  const getToken = async (): Promise<string> => {
+    const { data: { session }, error: refreshError } = await db.auth.refreshSession();
+    if (refreshError || !session?.user) {
+      throw new Error('You must be logged in to run a search. Please sign in again.');
+    }
+    const token = session.access_token;
+    if (!token) throw new Error('Session expired. Please sign in again.');
+    return token;
+  };
+
+  let token = await getToken();
+  let response: Response;
+  try {
+    response = await fetchWithAuth(url, options, token);
+    if (response.status === 401) {
+      token = await getToken();
+      response = await fetchWithAuth(url, options, token);
+    }
+  } catch (networkErr) {
+    const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    throw new Error(msg);
+  }
+
+  const text = await response.text();
+  let body: {
+    error?: string | { code?: number; message?: string };
+    message?: string | Record<string, unknown>;
+    scrapingJobId?: string;
+    imported?: number;
+    skipped?: number;
+    totalFromApify?: number;
+    savedSearchId?: string | null;
+    savedSearchName?: string | null;
+  };
+  try {
+    body = text ? (JSON.parse(text) as typeof body) : {};
+  } catch {
+    body = {};
+  }
+  /** Always return a string for the user; avoid [object Object]. */
+  const toErrorString = (v: unknown): string => {
+    if (typeof v === 'string') return v;
+    if (v && typeof v === 'object' && 'message' in v && typeof (v as { message: unknown }).message === 'string')
+      return (v as { message: string }).message;
+    return v != null ? String(v) : '';
+  };
+  if (!response.ok) {
+    const raw =
+      typeof body?.error === 'string'
+        ? body.error
+        : typeof body?.message === 'string'
+          ? body.message
+          : body?.error != null
+            ? toErrorString(body.error)
+            : body?.message != null
+              ? toErrorString(body.message)
+              : text || `Edge Function returned ${response.status}`;
+    let message = toErrorString(raw);
+    if (!message) message = text || `Edge Function returned ${response.status}`;
+    if (response.status === 401) {
+      if (/Invalid JWT|invalid.*jwt|unauthorized|expired|session expired/i.test(message)) {
+        message =
+          'Sesión no reconocida (a veces por la migración JWT en Supabase). Solución: despliega la función sin verificación JWT: npx supabase functions deploy run-linkedin-post-feed --no-verify-jwt. Luego cierra sesión, vuelve a entrar y prueba de nuevo.';
+      } else if (/must be logged in/i.test(message)) {
+        message =
+          'Sesión no reconocida. Ejecuta: npx supabase functions deploy run-linkedin-post-feed --no-verify-jwt. Luego cierra sesión y vuelve a entrar.';
+      }
+    }
+    throw new Error(message);
+  }
+  if (body?.error) throw new Error(toErrorString(body.error));
+  if (body?.scrapingJobId == null) throw new Error('Invalid response from run-linkedin-post-feed.');
   return {
     scrapingJobId: body.scrapingJobId,
     imported: body.imported ?? 0,
@@ -454,6 +563,8 @@ function mapPostedLimitToApify(postedLimit: string): string {
 export const APIFY_ACTORS = {
   /** HarvestAPI: job titles + locations + postedLimit (e.g. Past 24 hours), no cookies, rich output */
   LINKEDIN_JOBS: 'harvestapi/linkedin-job-search',
+  /** HarvestAPI: search LinkedIn posts by keywords, no cookies */
+  LINKEDIN_POST_SEARCH: 'harvestapi/linkedin-post-search',
   LINKEDIN_JOBS_LEGACY: 'bebity/linkedin-jobs-scraper',
   INDEED_JOBS: 'misceres/indeed-scraper',
   GLASSDOOR_JOBS: 'epctex/glassdoor-jobs-scraper',
