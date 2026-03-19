@@ -46,15 +46,17 @@ interface CRMPreferences {
 function getCRMPreferences(): CRMPreferences {
   try {
     const raw = localStorage.getItem(CRM_PREFS_KEY);
-    if (!raw) return { viewMode: 'table' };
+    if (!raw) return { viewMode: 'table', marked_as_lead_only: true, view_by: 'person' };
     const parsed = JSON.parse(raw) as Partial<CRMPreferences>;
     return {
       viewMode: parsed.viewMode === 'kanban' ? 'kanban' : 'table',
-      marked_as_lead_only: parsed.marked_as_lead_only === true ? true : undefined,
+      // Default ON so CRM matches Discovery → Leads: only pipeline leads (avoids paging out
+      // newly marked rows when unmarked search results fill the first 500 rows by score).
+      marked_as_lead_only: parsed.marked_as_lead_only === false ? false : true,
       view_by: parsed.view_by === 'company' ? 'company' : 'person',
     };
   } catch {
-    return { viewMode: 'table' };
+    return { viewMode: 'table', marked_as_lead_only: true, view_by: 'person' };
   }
 }
 
@@ -307,7 +309,6 @@ export function CRMView() {
     if (filters.search) count++;
     if (filters.tags?.length) count++;
     if (filters.saved_search_id) count++;
-    if (filters.marked_as_lead_only === true) count++;
     if (filters.view_by) count++;
     if (filters.channel?.length) count++;
     return count;
@@ -365,8 +366,8 @@ export function CRMView() {
           <label className="flex items-center gap-2 text-sm text-vloom-text cursor-pointer">
             <input
               type="checkbox"
-              checked={filters.marked_as_lead_only === true}
-              onChange={(e) => updateFilter('marked_as_lead_only', e.target.checked ? true : undefined)}
+              checked={filters.marked_as_lead_only !== false}
+              onChange={(e) => updateFilter('marked_as_lead_only', e.target.checked)}
               className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent"
             />
             Marked leads only

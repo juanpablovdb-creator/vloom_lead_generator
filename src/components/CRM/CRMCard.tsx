@@ -12,6 +12,14 @@ interface CRMCardProps {
   onOpen?: (lead: Lead) => void;
 }
 
+/** When `company_name` is empty, LinkedIn headlines often contain "Role at Company". */
+function companyFromHeadline(headline: string | null | undefined): string {
+  if (!headline?.trim()) return '';
+  const m = headline.trim().match(/\s+at\s+(.+)$/i);
+  if (!m?.[1]) return '';
+  return (m[1].split('|')[0] ?? m[1]).trim();
+}
+
 export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProps) {
   const [isNotesOpen, setIsNotesOpen] = useState(false);
   const [notesDraft, setNotesDraft] = useState<string>(lead.notes ?? '');
@@ -20,11 +28,25 @@ export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProp
   const [taskTitle, setTaskTitle] = useState('');
   const [savingTask, setSavingTask] = useState(false);
 
-  const companyName = lead.company_name || 'No name';
+  const companyStr = lead.company_name?.trim() || '';
+  const contactStr = lead.contact_name?.trim() || '';
+  const jobStr = lead.job_title?.trim() || '';
+  const headlineCompany = !companyStr ? companyFromHeadline(lead.contact_title) : '';
+  /** Prefer company; Post Feeds often lack DB company until enrich — use headline "at Company" when present. */
+  const primaryTitle =
+    companyStr ||
+    headlineCompany ||
+    contactStr ||
+    (jobStr.length > 72 ? `${jobStr.slice(0, 72)}…` : jobStr) ||
+    '—';
+
   const parts: string[] = [];
   if (lead.company_location) parts.push(lead.company_location);
-  if (lead.job_title) parts.push(lead.job_title);
-  if (lead.contact_name && lead.contact_name !== lead.company_name) parts.push(lead.contact_name);
+  if (lead.contact_title?.trim()) parts.push(lead.contact_title.trim());
+  else if (jobStr && jobStr !== companyStr && jobStr !== contactStr) parts.push(jobStr);
+  if (contactStr && contactStr !== companyStr && !parts.some((p) => p.includes(contactStr))) {
+    parts.push(contactStr);
+  }
   if (lead.company_industry && !parts.includes(lead.company_industry)) parts.push(lead.company_industry);
   const subLine = parts.slice(0, 3).join(' · ') || null;
 
@@ -39,7 +61,7 @@ export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProp
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-vloom-text truncate">{companyName}</p>
+          <p className="text-sm font-medium text-vloom-text truncate">{primaryTitle}</p>
           {subLine && <p className="text-[11px] text-vloom-muted truncate mt-0.5 leading-tight">{subLine}</p>}
         </div>
       </div>
@@ -196,7 +218,7 @@ export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProp
                 className="px-3 py-1 rounded-md bg-vloom-accent text-[11px] text-white disabled:opacity-60"
                 onClick={async () => {
                   if (!supabase) return;
-                  const title = (taskTitle || '').trim() || `Task for ${companyName}`;
+                  const title = (taskTitle || '').trim() || `Task for ${primaryTitle}`;
                   setSavingTask(true);
                   try {
                     // Supabase client infers never for table insert; cast to satisfy typecheck (build)

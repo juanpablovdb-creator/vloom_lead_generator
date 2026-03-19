@@ -49,6 +49,7 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] LinkedIn Post Feeds: ejecutar `harvestapi/linkedin-post-search` y soportar Saved Searches → seleccionar → Send to leads
 - [x] Post Feeds: filtro `authorLocations` aplica ubicacion del autor vía `harvestapi/linkedin-profile-scraper`
 - [x] Post Feeds: normalizar `postedAt` del actor para evitar `"[object Object]"` en `job_posted_at` (timestamp)
+- [x] CRM: default “Marked leads only” + validar update en Send to leads (Post Feeds / Saved searches visibles en Backlog)
 
 ---
 

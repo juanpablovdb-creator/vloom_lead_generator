@@ -8,7 +8,7 @@ import { useLeads } from '@/hooks/useLeads';
 import { LeadsTable } from '@/components/LeadsTable';
 import { runJobSearchViaEdge, runLinkedInPostFeedViaEdge, sendSelectedToLeadsAndEnrich, recomputeLeadScores } from '@/lib/apify';
 import type { RunLinkedInSearchResult } from '@/lib/apify';
-import type { LeadStatus } from '@/types/database';
+import type { Lead, LeadStatus } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { Send } from 'lucide-react';
 
@@ -99,6 +99,14 @@ function SavedSearchResultsTable({
     updateFilter('status', NON_DISQUALIFIED_STATUSES.length > 0 ? [...NON_DISQUALIFIED_STATUSES] : undefined);
     clearSelection();
   }, [updateFilter, clearSelection]);
+
+  /** Row/cell click toggles selection — same as checkbox (onViewDetails was noop, so clicks did nothing). */
+  const handleRowCellActivate = useCallback(
+    (lead: Lead) => {
+      toggleSelection(lead.id);
+    },
+    [toggleSelection]
+  );
 
   const handleRestoreSelected = useCallback(async () => {
     const ids = Array.from(selectedIds);
@@ -361,7 +369,7 @@ function SavedSearchResultsTable({
         onDelete={noop}
         onStatusChange={(lead, status) => updateLeadStatus(lead.id, status)}
         onToggleShare={noop}
-        onViewDetails={noop}
+        onViewDetails={handleRowCellActivate}
         onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
         selectionAction={
           selectedIds.size > 0 ? (

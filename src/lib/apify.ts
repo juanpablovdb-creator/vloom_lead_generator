@@ -276,9 +276,24 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
   if (!leadIds.length) return { sent: 0, enriched: 0 };
   const db = supabase;
 
-  const { error: updateError } = await db.from('leads').update({ is_marked_as_lead: true, status: 'backlog', updated_at: new Date().toISOString() } as never).in('id', leadIds);
+  const { data: updatedRows, error: updateError } = await db
+    .from('leads')
+    .update({ is_marked_as_lead: true, status: 'backlog', updated_at: new Date().toISOString() } as never)
+    .in('id', leadIds)
+    .select('id');
 
   if (updateError) throw new Error(updateError.message);
+  const updatedCount = (updatedRows as { id: string }[] | null)?.length ?? 0;
+  if (updatedCount === 0) {
+    throw new Error(
+      'No leads were updated. They may be missing or your session may not allow updating them. Try refreshing and signing in again.'
+    );
+  }
+  if (updatedCount < leadIds.length) {
+    throw new Error(
+      `Only ${updatedCount} of ${leadIds.length} leads were updated (permission or missing rows). Check that all selected rows belong to your account.`
+    );
+  }
 
   // Auto-create "Contact ..." tasks for newly marked leads so Tasks view stays in sync.
   // Avoid duplicates by only inserting tasks for leads that don't already have one.
@@ -416,7 +431,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
   }
 
   return {
-    sent: leadIds.length,
+    sent: updatedCount,
     enriched: body?.enriched ?? 0,
     personaCompaniesProcessed,
     personaLeadsCreated,

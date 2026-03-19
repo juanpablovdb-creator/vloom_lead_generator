@@ -26,6 +26,7 @@ import type { LeadSource } from './HomePage';
 import { useLeads } from '@/hooks/useLeads';
 import { LeadsTable } from '@/components/LeadsTable';
 import { supabase } from '@/lib/supabase';
+import type { Lead } from '@/types/database';
 
 // =====================================================
 // APIFY ACTOR INPUT SCHEMAS
@@ -495,6 +496,13 @@ function SearchResultsTable({ scrapingJobId }: { scrapingJobId: string }) {
     pageSize: 25,
   });
 
+  const handleRowCellActivate = React.useCallback(
+    (lead: Lead) => {
+      toggleSelection(lead.id);
+    },
+    [toggleSelection]
+  );
+
   if (error) {
     return (
       <div className="rounded-xl border border-vloom-border bg-vloom-surface p-4 text-sm text-red-600">{error}</div>
@@ -530,7 +538,7 @@ function SearchResultsTable({ scrapingJobId }: { scrapingJobId: string }) {
         onDelete={noop}
         onStatusChange={(lead, status) => updateLeadStatus(lead.id, status)}
         onToggleShare={noop}
-        onViewDetails={noop}
+        onViewDetails={handleRowCellActivate}
         onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
       />
       {totalCount > pagination.pageSize && (

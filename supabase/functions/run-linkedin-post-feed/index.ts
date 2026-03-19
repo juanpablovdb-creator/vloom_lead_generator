@@ -191,6 +191,20 @@ type PostResult = {
   companyLinkedinUrl?: string;
 };
 
+/** LinkedIn headlines are often "Title at Company" — actor sometimes omits structured companyName. */
+function inferCompanyFromHeadline(headline: string): string | undefined {
+  const h = headline.trim();
+  if (!h) return undefined;
+  const atMatch = h.match(/\s+at\s+(.+)$/i);
+  if (atMatch?.[1]) {
+    let rest = atMatch[1].trim();
+    const pipe = rest.split(/\s*\|\s*/)[0];
+    if (pipe) rest = pipe.trim();
+    return rest.length > 0 ? rest : undefined;
+  }
+  return undefined;
+}
+
 function normalizeLinkedInPosts(items: Record<string, unknown>[]): PostResult[] {
   return items.map((item) => {
     const author = (item.author as Record<string, unknown> | undefined) ??
@@ -259,15 +273,42 @@ function normalizeLinkedInPosts(items: Record<string, unknown>[]): PostResult[] 
       str(item.location) ||
       undefined;
 
-    const companyName =
+    let companyName =
       str(item.companyName) ||
       (company ? str(company.name) : "") ||
+      str(item.organizationName) ||
+      str(item.orgName) ||
+      str(item.authorCompanyName) ||
+      (typeof item.authorCompany === "string" ? item.authorCompany.trim() : "") ||
+      (author
+        ? (str(author.companyName) ||
+          (typeof author.company === "string" ? str(author.company) : "") ||
+          (author.company && typeof author.company === "object"
+            ? str((author.company as Record<string, unknown>).name)
+            : ""))
+        : "") ||
       undefined;
 
     const companyLinkedinUrl =
       str(item.companyLinkedinUrl) ||
       (company ? (str(company.url) || str(company.linkedinUrl)) : "") ||
+      (author && typeof author.company === "object" && author.company
+        ? str((author.company as Record<string, unknown>).url) ||
+          str((author.company as Record<string, unknown>).linkedinUrl)
+        : "") ||
       undefined;
+
+    if (!companyName?.trim() && authorTitle) {
+      const inferred = inferCompanyFromHeadline(authorTitle);
+      if (inferred) companyName = inferred;
+    }
+    if (!companyName?.trim()) {
+      const headlineExtra = author ? str(author.headline) : "";
+      if (headlineExtra) {
+        const inferred = inferCompanyFromHeadline(headlineExtra);
+        if (inferred) companyName = inferred;
+      }
+    }
 
     return {
       externalId: externalId || undefined,
