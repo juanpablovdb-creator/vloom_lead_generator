@@ -46,6 +46,7 @@ const SOURCE_OPTIONS = [
 ];
 
 const CHANNEL_OPTIONS = [
+  { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
   { value: 'LinkedIn', label: 'LinkedIn' },
   { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
   { value: 'LinkedIn Post Feeds', label: 'LinkedIn Post Feeds' },

@@ -2,6 +2,7 @@
 // Leadflow Vloom - Apify Client
 // =====================================================
 import { supabase, supabaseUrl, getCurrentUser } from './supabase';
+import { LINKEDIN_JOB_POST_CHANNEL } from './leadChannels';
 import type { ApiKey, ApifyJobResult } from '@/types/database';
 
 /** Params for running LinkedIn job search (HarvestAPI). From New Search form or saved_searches.input */
@@ -973,7 +974,7 @@ export async function saveJobsAsLeads(
       status: 'backlog' as const,
       enrichment_data,
       tags: [],
-      channel: job.source === 'linkedin' ? 'LinkedIn Job Post' : null,
+      channel: job.source === 'linkedin' ? LINKEDIN_JOB_POST_CHANNEL : null,
     };
   });
 

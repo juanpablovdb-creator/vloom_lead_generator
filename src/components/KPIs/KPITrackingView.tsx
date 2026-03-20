@@ -22,6 +22,7 @@ import type { Lead, LeadStatus } from '@/types/database';
 const DEFAULT_NUM_WEEKS = 4;
 
 const CHANNEL_OPTIONS = [
+  { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
   { value: 'LinkedIn', label: 'LinkedIn' },
   { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
   { value: 'LinkedIn Post Feeds', label: 'LinkedIn Post Feeds' },

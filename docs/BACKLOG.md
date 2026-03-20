@@ -65,6 +65,7 @@ Items preparados para la próxima. 40-60% claros.
 
 ## Completado
 
+- [x] Canal LinkedIn Job Post: asignado al importar desde LinkedIn Jobs + backfill por `job_source` (migración 018).
 - [x] KPIs: labels alineados con CRM (Invite sent, Connected · Companies, Negotiation · Companies) + filtro por canal para ver KPIs por canales.
 - [x] KPIs: lista de personas detrás de cada número (click en celda → modal con nombres · compañía).
 - [x] CRM: nuevo lead en Invite sent; first_contacted_at; ordenar por fecha / last contacted / first contacted; canales LinkedIn Job Post y LinkedIn Post Feeds; channel LinkedIn en enriquecimiento y LinkedIn Job Post en import.
