@@ -203,8 +203,23 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       required: false,
       options: LOCATION_OPTIONS.map((loc) => ({ value: loc, label: loc })),
       defaultValue: '',
-      helpText: 'Optional. Select one or more (Ctrl/Cmd+click). USA, Canada, Europe. No typing needed.',
+      helpText:
+        'Optional. Geo locations (country, city). If you only pick Remote here, we send it to LinkedIn as a workplace filter, not as a place name.',
       icon: <MapPin className="w-4 h-4" />,
+    },
+    {
+      key: 'workplaceType',
+      label: 'Workplace (Remote / Hybrid / On-site)',
+      type: 'locations',
+      required: false,
+      options: [
+        { value: 'Remote', label: 'Remote' },
+        { value: 'Hybrid', label: 'Hybrid' },
+        { value: 'On-site', label: 'On-site' },
+      ],
+      defaultValue: '',
+      helpText: 'Optional. LinkedIn job filters by workplace type (separate from location). Combine with locations as needed.',
+      icon: <Briefcase className="w-4 h-4" />,
     },
     {
       key: 'postedLimit',

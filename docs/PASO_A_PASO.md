@@ -26,6 +26,35 @@ Más detalle: `docs/SUPABASE_SCHEMA.md`.
 
 ---
 
+## 0d. Si `npx supabase db push` falla con 401 / "login role" / pide `SUPABASE_DB_PASSWORD`
+
+La CLI necesita **proyecto enlazado** y a veces la **contraseña de Postgres** del proyecto (no es la anon key ni el service_role).
+
+1. **Inicia sesión en la CLI** (abre el navegador):
+
+   ```bash
+   npx supabase login
+   ```
+
+2. **Enlaza el repo al proyecto** (el _project ref_ sale de la URL del dashboard: `https://supabase.com/dashboard/project/<PROJECT_REF>`):
+
+   ```bash
+   npx supabase link --project-ref TU_PROJECT_REF
+   ```
+
+3. **Contraseña de la base:** Dashboard → **Project Settings** → **Database** → contraseña del usuario `postgres` (si no la tienes, **Reset database password** y guárdala). Luego en PowerShell, en la misma sesión donde ejecutas `db push`:
+
+   ```powershell
+   $env:SUPABASE_DB_PASSWORD = "tu-contraseña-postgres"
+   npx supabase db push
+   ```
+
+   O crea un `.env` local **solo para la CLI** (no commitear) con `SUPABASE_DB_PASSWORD=...`; algunas versiones de la CLI también leen variables del entorno del sistema.
+
+4. **Sin CLI:** en **SQL Editor** del dashboard puedes pegar y ejecutar el contenido del archivo de migración pendiente (p. ej. `supabase/migrations/020_....sql`), si el resto de migraciones ya está aplicado.
+
+---
+
 ## 0c. Si ves "Sesión caducada" y "Actualizar sesión" no basta
 
 1. **JWT expiry** (opcional): En **Project Settings** → **JWT Keys** → "Access token expiry time" puedes subir el valor (p. ej. 3600 o 300000). Guarda.

@@ -80,9 +80,30 @@ function buildSearchParams(input: Record<string, unknown>): Record<string, unkno
     postedLimit: (input.postedLimit as string) ?? "Past Week",
     maxItems: typeof input.maxItems === "number" ? input.maxItems : Number(input.maxItems) || 500,
     sort: (input.sort as string) ?? "date",
+    workplaceType: toArray(input.workplaceType ?? []),
+    employmentType: toArray(input.employmentType ?? []),
+    experienceLevel: toArray(input.experienceLevel ?? []),
     // Keep raw excludeDomains (string or comma-separated) so we can filter after scraping.
     excludeDomains: input.excludeDomains ?? input.excludeDomain ?? "",
   };
+}
+
+/** LinkedIn "Remote" is a workplace filter, not a geo location for HarvestAPI. */
+function splitRemoteFromLocations(
+  locations: string[],
+  workplaceTypeFromInput: string[],
+): { geoLocations: string[]; workplaceTypes: string[] } {
+  const workplace = new Set<string>(
+    workplaceTypeFromInput.map((w) => w.trim()).filter(Boolean),
+  );
+  const geo: string[] = [];
+  for (const loc of locations) {
+    const t = loc.trim();
+    if (!t) continue;
+    if (t.toLowerCase() === "remote") workplace.add("Remote");
+    else geo.push(t);
+  }
+  return { geoLocations: geo, workplaceTypes: [...workplace] };
 }
 
 function str(v: unknown): string {
@@ -247,6 +268,9 @@ Deno.serve(async (req: Request) => {
     postedLimit: string;
     maxItems: number;
     sort: string;
+    workplaceType?: string[];
+    employmentType?: string[];
+    experienceLevel?: string[];
     excludeDomains?: unknown;
   };
   if (!params.jobTitles?.length) {
@@ -257,9 +281,19 @@ Deno.serve(async (req: Request) => {
   }
 
   const searchQuery = params.jobTitles.join(", ");
+  const wt = toArray(params.workplaceType);
+  const et = toArray(params.employmentType);
+  const el = toArray(params.experienceLevel);
+  const { geoLocations, workplaceTypes } = splitRemoteFromLocations(
+    toArray(params.locations),
+    wt,
+  );
   const searchFilters = {
     jobTitles: params.jobTitles,
-    locations: params.locations,
+    locations: geoLocations,
+    workplaceType: workplaceTypes,
+    employmentType: et,
+    experienceLevel: el,
     postedLimit: params.postedLimit,
     maxItems: params.maxItems,
     sort: params.sort,
@@ -298,7 +332,7 @@ Deno.serve(async (req: Request) => {
     run_id: null,
     saved_search_id: resolvedSavedSearchId,
     search_query: searchQuery,
-    search_location: params.locations?.join(", ") ?? null,
+    search_location: geoLocations.length > 0 ? geoLocations.join(", ") : null,
     search_filters: searchFilters,
     status: "running",
     leads_found: 0,
@@ -338,13 +372,16 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const apifyInput = {
+    const apifyInput: Record<string, unknown> = {
       jobTitles: params.jobTitles.filter(Boolean),
-      locations: params.locations?.filter(Boolean) ?? [],
+      locations: geoLocations.filter(Boolean),
       postedLimit: mapPostedLimitToApify((params.postedLimit as string) ?? "Past Week"),
       maxItems: params.maxItems ?? 500,
       sortBy: (params.sort as string) ?? "date",
     };
+    if (workplaceTypes.length > 0) apifyInput.workplaceType = workplaceTypes;
+    if (et.length > 0) apifyInput.employmentType = et;
+    if (el.length > 0) apifyInput.experienceLevel = el;
     const actorIdForUrl = toApifyActorId(LINKEDIN_JOBS_ACTOR);
     const runUrl = `${APIFY_BASE_URL}/acts/${actorIdForUrl}/runs?waitForFinish=60`;
     const runRes = await fetch(runUrl, {
@@ -464,15 +501,35 @@ Deno.serve(async (req: Request) => {
 
     const { data: leads } = await supabase
       .from("leads")
-      .select("job_url")
-      .eq("user_id", user.id)
-      .not("job_url", "is", null);
+      .select("job_url, job_external_id")
+      .eq("user_id", user.id);
     const existingUrls = new Set<string>();
-    (leads ?? []).forEach((r: { job_url: string | null }) => {
+    const existingExternalIds = new Set<string>();
+    (leads ?? []).forEach((r: { job_url: string | null; job_external_id: string | null }) => {
       if (r.job_url) existingUrls.add(r.job_url);
+      if (r.job_external_id) existingExternalIds.add(r.job_external_id);
     });
-    const newJobs = jobs.filter((j) => j.url && !existingUrls.has(j.url));
-    console.log("[run-job-search] new jobs to insert", newJobs.length, "existing urls", existingUrls.size);
+    let newJobs = jobs.filter((j) => {
+      if (!j.url) return false;
+      if (existingUrls.has(j.url)) return false;
+      if (j.externalId && existingExternalIds.has(j.externalId)) return false;
+      return true;
+    });
+    const seenBatchKeys = new Set<string>();
+    newJobs = newJobs.filter((j) => {
+      const key = j.externalId ? `id:${j.externalId}` : `url:${j.url}`;
+      if (seenBatchKeys.has(key)) return false;
+      seenBatchKeys.add(key);
+      return true;
+    });
+    console.log(
+      "[run-job-search] new jobs to insert",
+      newJobs.length,
+      "existing urls",
+      existingUrls.size,
+      "existing job_external_id",
+      existingExternalIds.size,
+    );
 
     const leadsToInsert = newJobs.map((job) => {
       const enrichment_data: Record<string, unknown> = {};

@@ -122,6 +122,14 @@ export function LeadCardPopup({
   const [statusHistory, setStatusHistory] = useState<LeadStatusHistory[]>([]);
   const [otherContactsAtCompany, setOtherContactsAtCompany] = useState<Pick<Lead, 'id' | 'contact_name' | 'contact_email' | 'company_name'>[]>([]);
 
+  const channelSummaryLabel = useMemo(() => {
+    const c = localLead.channel?.trim();
+    if (c) return c;
+    if (localLead.job_url && /linkedin\.com\/jobs/i.test(localLead.job_url)) return 'LinkedIn Job Post';
+    if (localLead.job_source === 'linkedin_post_feed') return 'LinkedIn Post Feeds';
+    return null;
+  }, [localLead.channel, localLead.job_url, localLead.job_source]);
+
   const fetchOtherContactsAtCompany = useCallback(async () => {
     if (!supabase || !localLead.id) return;
     const linkedInUrl = localLead.company_linkedin_url?.trim();
@@ -279,7 +287,7 @@ export function LeadCardPopup({
         )}
         <div>
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Channel</div>
-          <div className="text-sm text-vloom-text">{localLead.channel || '—'}</div>
+          <div className="text-sm text-vloom-text">{channelSummaryLabel || '—'}</div>
         </div>
       </div>
 

@@ -295,6 +295,34 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
     );
   }
 
+  // Job posts from LinkedIn often had null channel in older imports; set default before enrichment.
+  try {
+    const { data: channelRows } = await db
+      .from('leads')
+      .select('id, channel, job_url')
+      .in('id', leadIds);
+    const needChannel = (channelRows ?? []).filter(
+      (r: { id: string; channel: string | null; job_url: string | null }) =>
+        !(r.channel && r.channel.trim()) &&
+        typeof r.job_url === 'string' &&
+        /linkedin\.com\/jobs/i.test(r.job_url),
+    );
+    if (needChannel.length > 0) {
+      await db
+        .from('leads')
+        .update({
+          channel: 'LinkedIn Job Post',
+          updated_at: new Date().toISOString(),
+        } as never)
+        .in(
+          'id',
+          needChannel.map((r: { id: string }) => r.id),
+        );
+    }
+  } catch (channelErr) {
+    console.warn('Could not backfill channel for job posts:', channelErr);
+  }
+
   // Auto-create "Contact ..." tasks for newly marked leads so Tasks view stays in sync.
   // Avoid duplicates by only inserting tasks for leads that don't already have one.
   try {
@@ -713,14 +741,22 @@ export class ApifyClient {
     experienceLevel?: string[];
     [key: string]: unknown;
   }): Promise<ApifyJobResult[]> {
+    const workplaceMerged = new Set<string>(
+      (params.workplaceType ?? []).map((w) => w.trim()).filter(Boolean),
+    );
+    const geoLocations: string[] = [];
+    for (const loc of params.locations?.filter(Boolean) ?? []) {
+      if (loc.toLowerCase() === 'remote') workplaceMerged.add('Remote');
+      else geoLocations.push(loc);
+    }
     const input: Record<string, unknown> = {
       jobTitles: params.jobTitles.filter(Boolean),
-      locations: params.locations?.filter(Boolean) ?? [],
+      locations: geoLocations,
       postedLimit: mapPostedLimitToApify(params.postedLimit ?? 'Past Week'),
       maxItems: params.maxItems ?? 50,
       sortBy: params.sort ?? 'date',
     };
-    if (params.workplaceType?.length) input.workplaceType = params.workplaceType;
+    if (workplaceMerged.size > 0) input.workplaceType = [...workplaceMerged];
     if (params.employmentType?.length) input.employmentType = params.employmentType;
     if (params.experienceLevel?.length) input.experienceLevel = params.experienceLevel;
 
@@ -936,8 +972,30 @@ export async function saveJobsAsLeads(
   userId: string
 ): Promise<{ imported: number; skipped: number }> {
   if (!supabase) throw new Error('Supabase not configured.');
-  const existingUrls = await getExistingJobUrls(userId);
-  const newJobs = jobs.filter((j) => j.url && !existingUrls.has(j.url));
+  const db = supabase;
+  const { data: existingRows } = await db
+    .from('leads')
+    .select('job_url, job_external_id')
+    .eq('user_id', userId);
+  const existingUrls = new Set<string>();
+  const existingExternalIds = new Set<string>();
+  for (const r of (existingRows ?? []) as { job_url: string | null; job_external_id: string | null }[]) {
+    if (r.job_url) existingUrls.add(r.job_url);
+    if (r.job_external_id) existingExternalIds.add(r.job_external_id);
+  }
+  let newJobs = jobs.filter((j) => {
+    if (!j.url) return false;
+    if (existingUrls.has(j.url)) return false;
+    if (j.externalId && existingExternalIds.has(j.externalId)) return false;
+    return true;
+  });
+  const seenBatch = new Set<string>();
+  newJobs = newJobs.filter((j) => {
+    const key = j.externalId ? `id:${j.externalId}` : `url:${j.url}`;
+    if (seenBatch.has(key)) return false;
+    seenBatch.add(key);
+    return true;
+  });
 
   const leads = newJobs.map((job) => {
     const enrichment_data: Record<string, unknown> = {};

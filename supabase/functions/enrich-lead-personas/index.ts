@@ -296,13 +296,18 @@ Deno.serve(async (req: Request) => {
       for (const item of items as Record<string, unknown>[]) {
         const contactLinkedIn = str(item.linkedinUrl ?? item.linkedin_url);
         if (!contactLinkedIn) continue;
+        // Job listing URLs are not people; including them caused bad rows and unique conflicts.
+        if (/\/jobs\/view\//i.test(contactLinkedIn)) continue;
+
+        const withoutSlash = contactLinkedIn.trim().replace(/\/$/, "");
+        const urlVariants = [...new Set([withoutSlash, `${withoutSlash}/`, contactLinkedIn.trim()])];
 
         // Dedupe: skip if we already have a lead for this user + contact (same person)
         const { data: existing } = await supabase
           .from("leads")
           .select("id")
           .eq("user_id", template.user_id)
-          .eq("contact_linkedin_url", contactLinkedIn)
+          .in("contact_linkedin_url", urlVariants)
           .limit(1);
         if (existing?.length) continue;
 
@@ -331,7 +336,7 @@ Deno.serve(async (req: Request) => {
           contact_name: contactName || null,
           contact_title: contactTitle || null,
           contact_email: contactEmail || null,
-          contact_linkedin_url: contactLinkedIn || null,
+          contact_linkedin_url: withoutSlash || null,
           contact_phone: null,
           status: "backlog",
           score: 0,
@@ -353,6 +358,11 @@ Deno.serve(async (req: Request) => {
           .single();
 
         if (insertErr) {
+          const code = (insertErr as { code?: string }).code;
+          if (code === "23505") {
+            console.warn("[enrich-lead-personas] skip duplicate lead", insertErr.message);
+            continue;
+          }
           console.error("[enrich-lead-personas] insert error", insertErr);
           continue;
         }
