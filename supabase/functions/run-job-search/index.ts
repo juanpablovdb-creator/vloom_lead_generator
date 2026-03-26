@@ -7,6 +7,7 @@ import { computeLeadScore } from "../_shared/leadScore.ts";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const LINKEDIN_JOBS_ACTOR = "harvestapi/linkedin-job-search";
+const LINKEDIN_JOB_POST_CHANNEL = "LinkedIn Job Post";
 
 /** API docs: actorId is username~actor-name (tilde). Normalize slash to tilde for URL. */
 function toApifyActorId(actorId: string): string {
@@ -574,7 +575,7 @@ Deno.serve(async (req: Request) => {
         score,
         enrichment_data,
         tags: [],
-        channel: "LinkedIn Job Post",
+        channel: LINKEDIN_JOB_POST_CHANNEL,
       };
     });
 
