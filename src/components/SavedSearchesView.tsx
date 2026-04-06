@@ -486,7 +486,8 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
 
   // While this view is open: re-run saved searches with Autorun on at most once per cooldown.
   useEffect(() => {
-    if (!supabase || isLoading) return;
+    const db = supabase;
+    if (!db || isLoading) return;
 
     const tick = async () => {
       if (runLockRef.current) return;
@@ -509,7 +510,7 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
             s.actor_id === LINKEDIN_POST_FEED_ACTOR_ID
               ? await runLinkedInPostFeedViaEdge({ savedSearchId: s.id })
               : await runJobSearchViaEdge({ actorId: s.actor_id, savedSearchId: s.id });
-          await supabase
+          await db
             .from('saved_searches')
             .update({ autorun_last_run_at: new Date().toISOString() } as never)
             .eq('id', s.id);
