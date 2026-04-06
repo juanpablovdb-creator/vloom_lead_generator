@@ -974,15 +974,24 @@ export async function saveJobsAsLeads(
 ): Promise<{ imported: number; skipped: number }> {
   if (!supabase) throw new Error('Supabase not configured.');
   const db = supabase;
-  const { data: existingRows } = await db
-    .from('leads')
-    .select('job_url, job_external_id')
-    .eq('user_id', userId);
   const existingUrls = new Set<string>();
   const existingExternalIds = new Set<string>();
-  for (const r of (existingRows ?? []) as { job_url: string | null; job_external_id: string | null }[]) {
-    if (r.job_url) existingUrls.add(r.job_url);
-    if (r.job_external_id) existingExternalIds.add(r.job_external_id);
+  const pageSize = 1000;
+  let from = 0;
+  for (;;) {
+    const { data: batch, error: batchErr } = await db
+      .from('leads')
+      .select('job_url, job_external_id')
+      .eq('user_id', userId)
+      .range(from, from + pageSize - 1);
+    if (batchErr) throw batchErr;
+    const rows = (batch ?? []) as { job_url: string | null; job_external_id: string | null }[];
+    for (const r of rows) {
+      if (r.job_url) existingUrls.add(r.job_url);
+      if (r.job_external_id) existingExternalIds.add(r.job_external_id);
+    }
+    if (rows.length < pageSize) break;
+    from += pageSize;
   }
   let newJobs = jobs.filter((j) => {
     if (!j.url) return false;

@@ -29,7 +29,6 @@ export function useAuth() {
     if (import.meta.env.DEV) {
       // Helps debug OAuth flows that "return to login" without visible errors.
       // Avoid logging tokens; only log event/user existence.
-      // eslint-disable-next-line no-console
       console.log("[useAuth] mount", { hasOAuthParams, initialUrl: window.location.href });
     }
 
@@ -45,7 +44,6 @@ export function useAuth() {
       setUser(session?.user ?? null);
 
       if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
         console.log("[useAuth] auth event", { event, hasUser: Boolean(session?.user), userEmail: session?.user?.email ?? null });
       }
 
@@ -68,7 +66,7 @@ export function useAuth() {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [hasOAuthParams]);
 
   const signOut = async () => {
     if (supabase) await supabase.auth.signOut();

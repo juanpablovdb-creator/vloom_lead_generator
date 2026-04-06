@@ -4,6 +4,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computeLeadScore } from "../_shared/leadScore.ts";
+import { loadExistingLeadDedupeKeys } from "../_shared/loadExistingLeadDedupeKeys.ts";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const LINKEDIN_POSTS_ACTOR = "harvestapi/linkedin-post-search";
@@ -554,7 +555,7 @@ Deno.serve(async (req: Request) => {
       const datasetId = runData?.data?.defaultDatasetId;
       const status = runData?.data?.status;
 
-      if (status !== "SUCCEEDED" && status !== "RUNNING") {
+      if (status !== "SUCCEEDED" && status !== "RUNNING" && status !== "READY") {
         throw new Error(`Apify run status: ${status}`);
       }
 
@@ -573,9 +574,10 @@ Deno.serve(async (req: Request) => {
 
       if (status === "SUCCEEDED" && datasetId) {
         await getDatasetItems(datasetId);
-      } else if (status === "RUNNING" && runId) {
+      } else if ((status === "RUNNING" || status === "READY") && runId) {
         const maxWait = 600;
         const step = 5;
+        let pollFinished = false;
         for (let waited = 0; waited < maxWait; waited += step) {
           await new Promise((r) => setTimeout(r, step * 1000));
           const statusRes = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, { headers: apifyHeaders });
@@ -590,9 +592,20 @@ Deno.serve(async (req: Request) => {
             const dsId = statusData?.data?.defaultDatasetId;
             if (!dsId) throw new Error("No dataset ID from Apify run.");
             await getDatasetItems(dsId);
+            pollFinished = true;
             break;
           }
-          if (s === "FAILED") throw new Error("Apify run failed.");
+          if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") {
+            throw new Error(`Apify run ended with status: ${s}`);
+          }
+        }
+        if (!pollFinished) {
+          const finalRes = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, { headers: apifyHeaders });
+          const finalData = finalRes.ok ? await finalRes.json() : null;
+          const fs = finalData?.data?.status ?? "UNKNOWN";
+          throw new Error(
+            `Apify run did not finish in time (last status: ${fs}). Try again or check the run in Apify Console.`,
+          );
         }
       } else if (status === "SUCCEEDED" && !datasetId) {
         throw new Error("No dataset ID from Apify run. Try again in a moment.");
@@ -698,7 +711,7 @@ Deno.serve(async (req: Request) => {
           const datasetId = runData?.data?.defaultDatasetId;
           const status = runData?.data?.status;
 
-          if (status !== "SUCCEEDED" && status !== "RUNNING") {
+          if (status !== "SUCCEEDED" && status !== "RUNNING" && status !== "READY") {
             throw new Error(`Apify profile run status: ${status}`);
           }
 
@@ -747,18 +760,10 @@ Deno.serve(async (req: Request) => {
       }
 
       // Dedupe by job_external_id (post id/urn) and fallback by job_url.
-      const { data: existing } = await supabase
-        .from("leads")
-        .select("job_external_id, job_url")
-        .eq("user_id", user.id)
-        .or("job_external_id.not.is.null,job_url.not.is.null");
-
-      const existingExternalIds = new Set<string>();
-      const existingUrls = new Set<string>();
-      (existing ?? []).forEach((r: { job_external_id: string | null; job_url: string | null }) => {
-        if (r.job_external_id) existingExternalIds.add(r.job_external_id);
-        if (r.job_url) existingUrls.add(r.job_url);
-      });
+      const { urls: existingUrls, externalIds: existingExternalIds } = await loadExistingLeadDedupeKeys(
+        supabase,
+        user.id,
+      );
 
       const newPosts = postsAfterLocationFilter.filter((p) => {
         const ext = p.externalId?.trim();

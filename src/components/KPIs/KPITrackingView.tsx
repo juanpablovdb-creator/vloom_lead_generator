@@ -300,7 +300,7 @@ function useLeadsForKPI(
     return () => {
       cancelled = true;
     };
-  }, [firstInviteSentByLeadId, channelFilter?.join(',') ?? '']);
+  }, [firstInviteSentByLeadId, channelFilter]);
 
   return { leads, isLoading };
 }

@@ -223,7 +223,7 @@ function LeadsListView({
     clearSelection,
     isAllSelected,
   } = useLeads({
-    initialFilters: { marked_as_lead_only: true },
+    // Show all imported rows by default; Apify imports use is_marked_as_lead=false until you mark them.
     pageSize: 25,
   });
 
@@ -274,7 +274,7 @@ function LeadsListView({
             onChange={(e) => updateFilter('marked_as_lead_only', e.target.checked ? true : undefined)}
             className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent"
           />
-          Marked leads only
+          Pipeline only (marked as lead)
         </label>
       </div>
 

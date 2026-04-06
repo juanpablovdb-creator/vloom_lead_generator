@@ -81,14 +81,6 @@ function profileTitle(p: Record<string, unknown>): string {
   return str(pos) || "";
 }
 
-/** Extract location text from profile. */
-function profileLocationText(p: Record<string, unknown>): string | null {
-  const loc = p.location as Record<string, unknown> | undefined;
-  if (!loc) return null;
-  const text = loc.linkedinText ?? loc.parsed?.text ?? loc.description;
-  return str(text) || null;
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });

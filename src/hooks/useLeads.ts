@@ -407,7 +407,8 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     if (insertError) {
       const msg = insertError?.message ?? '';
       if (/first_contacted_at/i.test(msg) && /does not exist|unknown column|column/i.test(msg)) {
-        const { first_contacted_at: _omit, ...rowWithout } = row as unknown as Record<string, unknown>;
+        const { first_contacted_at: _fc, ...rowWithout } = row as unknown as Record<string, unknown>;
+        void _fc;
         const res2 = await insertOnce(rowWithout);
         if (res2.error) throw res2.error;
         inserted = res2.data;

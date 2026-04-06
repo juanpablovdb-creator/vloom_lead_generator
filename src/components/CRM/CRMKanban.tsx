@@ -33,7 +33,7 @@ export function CRMKanban({
   onUpdateLead,
   onOpenLead,
 }: CRMKanbanProps) {
-  const [_draggedLead, setDraggedLead] = useState<Lead | null>(null);
+  const [, setDraggedLead] = useState<Lead | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<LeadStatus | null>(null);
 
   const leadsByStatus = useMemo(() => {

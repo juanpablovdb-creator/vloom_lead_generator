@@ -1,7 +1,7 @@
 // =====================================================
 // Leadflow Vloom - Saved searches list + Run + View outputs
 // =====================================================
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Play, Loader2, Trash2, ArrowLeft, List, Pencil, Check, X } from 'lucide-react';
 import { useSavedSearches } from '@/hooks/useSavedSearches';
 import { useLeads } from '@/hooks/useLeads';
@@ -14,6 +14,9 @@ import { Send } from 'lucide-react';
 
 const LINKEDIN_ACTOR_ID = 'harvestapi/linkedin-job-search';
 const LINKEDIN_POST_FEED_ACTOR_ID = 'harvestapi/linkedin-post-search';
+/** Minimum time between automatic re-runs for a saved search (ms). */
+const AUTORUN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
 const NON_DISQUALIFIED_STATUSES: LeadStatus[] = [
   'backlog',
   'not_contacted',
@@ -444,30 +447,87 @@ function SavedSearchResultsTable({
 }
 
 export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesViewProps) {
-  const { savedSearches, isLoading, error, deleteSavedSearch, updateSavedSearch } =
+  const { savedSearches, isLoading, error, deleteSavedSearch, updateSavedSearch, refetch } =
     useSavedSearches();
   const [editingSearchId, setEditingSearchId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [runningId, setRunningId] = useState<string | null>(null);
   const [viewingSearchId, setViewingSearchId] = useState<string | null>(null);
+  /** Prevents overlapping manual Run and background autorun. */
+  const runLockRef = useRef(false);
 
   const handleRun = useCallback(
     async (id: string, actorId: string) => {
+      if (runLockRef.current) return;
+      runLockRef.current = true;
       setRunningId(id);
       try {
         const result =
           actorId === LINKEDIN_POST_FEED_ACTOR_ID
             ? await runLinkedInPostFeedViaEdge({ savedSearchId: id })
             : await runJobSearchViaEdge({ actorId, savedSearchId: id });
+        if (supabase) {
+          await supabase
+            .from('saved_searches')
+            .update({ autorun_last_run_at: new Date().toISOString() } as never)
+            .eq('id', id);
+          await refetch();
+        }
         onRunComplete(result);
       } catch (err) {
         onRunError(err instanceof Error ? err.message : String(err));
       } finally {
         setRunningId(null);
+        runLockRef.current = false;
       }
     },
-    [onRunComplete, onRunError]
+    [onRunComplete, onRunError, refetch]
   );
+
+  // While this view is open: re-run saved searches with Autorun on at most once per cooldown.
+  useEffect(() => {
+    if (!supabase || isLoading) return;
+
+    const tick = async () => {
+      if (runLockRef.current) return;
+      const supported = savedSearches.filter(
+        (s) => s.actor_id === LINKEDIN_ACTOR_ID || s.actor_id === LINKEDIN_POST_FEED_ACTOR_ID
+      );
+      const due = supported.filter((s) => {
+        if (!s.autorun) return false;
+        const last = s.autorun_last_run_at ? new Date(s.autorun_last_run_at).getTime() : 0;
+        return Date.now() - last >= AUTORUN_COOLDOWN_MS;
+      });
+      if (due.length === 0) return;
+
+      for (const s of due) {
+        if (runLockRef.current) break;
+        runLockRef.current = true;
+        setRunningId(s.id);
+        try {
+          const result =
+            s.actor_id === LINKEDIN_POST_FEED_ACTOR_ID
+              ? await runLinkedInPostFeedViaEdge({ savedSearchId: s.id })
+              : await runJobSearchViaEdge({ actorId: s.actor_id, savedSearchId: s.id });
+          await supabase
+            .from('saved_searches')
+            .update({ autorun_last_run_at: new Date().toISOString() } as never)
+            .eq('id', s.id);
+          await refetch();
+          console.info('[autorun] completed', s.name, 'imported', result.imported);
+        } catch (e) {
+          console.error('[autorun] failed', s.id, e);
+        } finally {
+          setRunningId(null);
+          runLockRef.current = false;
+        }
+      }
+    };
+
+    void tick();
+    const interval = setInterval(tick, 15 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [isLoading, savedSearches, refetch]);
 
   const supportedSearches = savedSearches.filter(
     (s) => s.actor_id === LINKEDIN_ACTOR_ID || s.actor_id === LINKEDIN_POST_FEED_ACTOR_ID
@@ -615,7 +675,7 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
                   </button>
                   <label
                     className="flex items-center gap-2 text-sm text-vloom-muted cursor-pointer"
-                    title="When on, this search will be eligible for automatic re-runs (scheduling coming soon)"
+                    title="While this screen is open, re-runs about once per 24 hours. Uses last run time (including manual Run)."
                   >
                     <span>Autorun</span>
                     <input

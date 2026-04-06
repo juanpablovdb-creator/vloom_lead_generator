@@ -47,17 +47,16 @@ interface CRMPreferences {
 function getCRMPreferences(): CRMPreferences {
   try {
     const raw = localStorage.getItem(CRM_PREFS_KEY);
-    if (!raw) return { viewMode: 'table', marked_as_lead_only: true, view_by: 'person' };
+    if (!raw) return { viewMode: 'table', marked_as_lead_only: false, view_by: 'person' };
     const parsed = JSON.parse(raw) as Partial<CRMPreferences>;
     return {
       viewMode: parsed.viewMode === 'kanban' ? 'kanban' : 'table',
-      // Default ON so CRM matches Discovery → Leads: only pipeline leads (avoids paging out
-      // newly marked rows when unmarked search results fill the first 500 rows by score).
-      marked_as_lead_only: parsed.marked_as_lead_only === false ? false : true,
+      // Default OFF so imported Apify rows (unmarked) appear until you turn on "Pipeline only".
+      marked_as_lead_only: parsed.marked_as_lead_only === true,
       view_by: parsed.view_by === 'company' ? 'company' : 'person',
     };
   } catch {
-    return { viewMode: 'table', marked_as_lead_only: true, view_by: 'person' };
+    return { viewMode: 'table', marked_as_lead_only: false, view_by: 'person' };
   }
 }
 
@@ -367,11 +366,11 @@ export function CRMView() {
           <label className="flex items-center gap-2 text-sm text-vloom-text cursor-pointer">
             <input
               type="checkbox"
-              checked={filters.marked_as_lead_only !== false}
-              onChange={(e) => updateFilter('marked_as_lead_only', e.target.checked)}
+              checked={filters.marked_as_lead_only === true}
+              onChange={(e) => updateFilter('marked_as_lead_only', e.target.checked ? true : undefined)}
               className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent"
             />
-            Marked leads only
+            Pipeline only (marked as lead)
           </label>
           <div className="flex rounded-lg border border-vloom-border overflow-hidden">
             <button

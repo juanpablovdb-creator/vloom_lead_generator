@@ -72,7 +72,7 @@ export function useSavedSearches() {
   );
 
   const updateSavedSearch = useCallback(
-    async (id: string, updates: { autorun?: boolean; name?: string }) => {
+    async (id: string, updates: { autorun?: boolean; name?: string; autorun_last_run_at?: string | null }) => {
       if (!supabase) return;
       await supabase.from('saved_searches').update(updates as never).eq('id', id);
       await fetchSearches();
