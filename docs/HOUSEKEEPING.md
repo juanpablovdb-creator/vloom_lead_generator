@@ -6,6 +6,7 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
+- **Build Vercel (tsc) fix:** `src/lib/apify.ts` tenía error TS2339 (`data` inferido como `never` en select de `api_keys`). Se castea a `{ api_key_encrypted?: string } | null`. `npm run build` vuelve a pasar.
 - **Zona horaria en nombres auto de Saved searches:** `run-job-search` y `run-linkedin-post-feed` formatean `autoName` en UTC-5 (tz `America/Bogota`) para que “Video Editor – …, HH:mm” coincida con negocio. Aplica a búsquedas nuevas (las existentes no cambian salvo renombrar).
 - **Fix rápido — gateway 401 antes del handler:** Si Supabase Edge muestra POST 401 con `execution_id: null` (sin logs de `[run-job-search] request`), el deploy recomendado es `supabase functions deploy run-job-search --no-verify-jwt` (el `config.toml` puede no estar aplicándose según CLI).
 - **Docs — logs para Invalid JWT:** En `docs/APIFY_SETUP.md` §3 se documenta dónde mirar (Dashboard Edge Functions → Logs, Network response, `supabase functions logs`, interpretación si no aparece `[run-job-search] request`).

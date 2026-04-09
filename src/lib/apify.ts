@@ -167,8 +167,10 @@ export async function getApifyApiKeyForBrowser(): Promise<string | null> {
     .eq('service', 'apify')
     .eq('is_active', true)
     .maybeSingle();
-  if (error || !data?.api_key_encrypted) return null;
-  return data.api_key_encrypted;
+  // Supabase types sometimes infer `never` for narrowed selects; cast to the expected shape.
+  const row = data as { api_key_encrypted?: string } | null;
+  if (error || !row?.api_key_encrypted) return null;
+  return row.api_key_encrypted;
 }
 
 async function userHasActiveApifyKeyInSettings(): Promise<boolean> {
