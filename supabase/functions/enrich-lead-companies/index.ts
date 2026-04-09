@@ -2,7 +2,8 @@
 // Receives: { leadIds: string[] }. Marks leads as lead + backlog are done by the client.
 // This function fetches those leads, runs harvestapi/linkedin-company, and updates enrichment_data + company_* fields.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
+import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
 import { computeLeadScore } from "../_shared/leadScore.ts";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
@@ -66,23 +67,17 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      { global: { headers: { Authorization: authHeader } } }
-    );
-
-    const jwt = authHeader.replace("Bearer ", "").trim();
-    const { data: { user }, error: userError } = await supabase.auth.getUser(jwt);
-    if (userError || !user) {
-      const reason = userError?.message?.toLowerCase().includes("expired")
+    const resolved = await resolveUserAndClient(authHeader);
+    if (!resolved.ok) {
+      const reason = resolved.message.toLowerCase().includes("expired")
         ? "Session expired. Please sign in again."
-        : userError?.message ?? "You must be logged in.";
+        : resolved.message;
       return new Response(JSON.stringify({ error: reason }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const { supabase } = resolved;
 
     let body: RequestBody;
     try {
@@ -178,18 +173,19 @@ Deno.serve(async (req: Request) => {
       const runData = await runRes.json();
       const runId = runData?.data?.id;
       const datasetId = runData?.data?.defaultDatasetId;
-      const status = runData?.data?.status;
+      const statusRaw = runData?.data?.status;
+      const status = normalizeApifyRunStatus(statusRaw);
 
-      if (status !== "SUCCEEDED" && status !== "RUNNING") {
+      if (status !== "SUCCEEDED" && status !== "RUNNING" && status !== "READY") {
         return new Response(
-          JSON.stringify({ error: `Apify run status: ${status}` }),
+          JSON.stringify({ error: `Apify run status: ${(statusRaw ?? status) || "unknown"}` }),
           { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
       let items: Record<string, unknown>[] = [];
       let resolvedDatasetId = datasetId;
-      if (status === "RUNNING" && runId) {
+      if ((status === "RUNNING" || status === "READY") && runId) {
         for (let i = 0; i < 60; i++) {
           await new Promise((r) => setTimeout(r, 2000));
           const statusRes = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, {
@@ -197,12 +193,12 @@ Deno.serve(async (req: Request) => {
           });
           if (!statusRes.ok) break;
           const statusData = await statusRes.json();
-          const s = statusData?.data?.status;
+          const s = normalizeApifyRunStatus(statusData?.data?.status);
           if (s === "SUCCEEDED") {
             resolvedDatasetId = statusData?.data?.defaultDatasetId ?? resolvedDatasetId;
             break;
           }
-          if (s === "FAILED") {
+          if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") {
             return new Response(JSON.stringify({ error: "Apify company enrichment run failed." }), {
               status: 502,
               headers: { ...corsHeaders, "Content-Type": "application/json" },

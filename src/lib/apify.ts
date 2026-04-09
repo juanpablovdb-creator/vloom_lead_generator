@@ -1,9 +1,179 @@
 // =====================================================
 // Leadflow Vloom - Apify Client
 // =====================================================
+import {
+  FunctionsFetchError,
+  FunctionsHttpError,
+  type SupabaseClient,
+} from '@supabase/supabase-js';
 import { supabase, supabaseUrl, getCurrentUser } from './supabase';
+import { mapWorkplaceTypesToHarvestApi } from './harvestLinkedInMaps';
 import { LINKEDIN_JOB_POST_CHANNEL } from './leadChannels';
-import type { ApiKey, ApifyJobResult } from '@/types/database';
+import type { ApifyJobResult, Database } from '@/types/database';
+
+/** Supabase Functions gateway expects `apikey` (anon) alongside `Authorization: Bearer <user_jwt>`. */
+const supabaseAnonKey =
+  typeof import.meta.env.VITE_SUPABASE_ANON_KEY === 'string'
+    ? import.meta.env.VITE_SUPABASE_ANON_KEY
+    : '';
+
+function edgeFunctionPostHeaders(token: string): Record<string, string> {
+  if (!supabaseAnonKey) {
+    throw new Error('VITE_SUPABASE_ANON_KEY is missing; cannot call Edge Functions.');
+  }
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+    apikey: supabaseAnonKey,
+  };
+}
+
+type AppSupabaseClient = SupabaseClient<Database>;
+
+function normalizeSupabaseUrlForJwtCheck(raw: string): string {
+  return raw.trim().replace(/\/$/, '').replace(/^http:\/\//i, 'https://');
+}
+
+/** Detect stale/wrong-project session before calling Edge (avoids opaque "Invalid JWT"). */
+function assertAccessTokenBelongsToSupabaseUrl(accessToken: string, projectUrl: string | undefined): void {
+  if (!projectUrl) return;
+  try {
+    const parts = accessToken.split('.');
+    if (parts.length < 2) return;
+    const pad = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(pad)) as { iss?: string };
+    const iss = typeof payload.iss === 'string' ? payload.iss : '';
+    const base = normalizeSupabaseUrlForJwtCheck(projectUrl);
+    if (!iss || !base) return;
+    const ok = iss === `${base}/auth/v1` || iss.startsWith(`${base}/`);
+    if (!ok) {
+      throw new Error(
+        'Tu sesión pertenece a otro proyecto de Supabase (el token no coincide con VITE_SUPABASE_URL). ' +
+          'Cierra sesión, borra datos del sitio para este dominio, vuelve a entrar, y revisa que Vercel/.env tengan la URL y anon key actuales del mismo proyecto.',
+      );
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('Tu sesión pertenece')) throw e;
+    /* ignore decode errors */
+  }
+}
+
+/** Fresh access token + explicit invoke headers (avoids anon-key-as-Bearer fallback in the SDK). */
+async function getFreshAccessTokenForEdge(db: AppSupabaseClient): Promise<string> {
+  if (!supabaseAnonKey) {
+    throw new Error('VITE_SUPABASE_ANON_KEY is missing; cannot call Edge Functions.');
+  }
+  const {
+    data: { session },
+    error,
+  } = await db.auth.refreshSession();
+  if (error || !session?.access_token) {
+    throw new Error('You must be logged in to run a search. Please sign in again.');
+  }
+  assertAccessTokenBelongsToSupabaseUrl(session.access_token, supabaseUrl);
+  return session.access_token;
+}
+
+function edgeInvokeHeaders(accessToken: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    apikey: supabaseAnonKey,
+  };
+}
+
+function edgeBodyErrorToString(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v && typeof v === 'object' && 'message' in v && typeof (v as { message: unknown }).message === 'string') {
+    return (v as { message: string }).message;
+  }
+  return v != null ? String(v) : '';
+}
+
+/** `instanceof FunctionsHttpError` can fail if multiple copies of `@supabase/functions-js` are bundled. */
+function getHttpResponseFromInvokeError(error: unknown): Response | null {
+  if (error instanceof FunctionsHttpError && error.context instanceof Response) {
+    return error.context;
+  }
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'context' in error &&
+    (error as { context: unknown }).context instanceof Response
+  ) {
+    return (error as { context: Response }).context;
+  }
+  return null;
+}
+
+async function parseEdgeInvokeErrorResponse(res: Response): Promise<{ status: number; message: string }> {
+  const status = res.status;
+  const text = await res.text();
+  let parsed: { error?: string; message?: string; msg?: string } = {};
+  try {
+    parsed = text ? (JSON.parse(text) as typeof parsed) : {};
+  } catch {
+    /* ignore */
+  }
+  const message =
+    typeof parsed.error === 'string'
+      ? parsed.error
+      : typeof parsed.message === 'string'
+        ? parsed.message
+        : typeof parsed.msg === 'string'
+          ? parsed.msg
+          : text || res.statusText || `HTTP ${status}`;
+  return { status, message };
+}
+
+async function parseFunctionsHttpError(
+  error: FunctionsHttpError,
+): Promise<{ status: number; message: string }> {
+  return parseEdgeInvokeErrorResponse(error.context as Response);
+}
+
+function formatEdge401(functionName: string, serverDetail: string): string {
+  return [
+    `El servidor rechazó la sesión al llamar a «${functionName}».`,
+    `Detalle técnico: ${serverDetail}.`,
+    'Para LinkedIn Jobs: añade la clave en Supabase → api_keys (service apify, tu user_id) o VITE_APIFY_API_TOKEN en el deploy para buscar en el navegador sin Edge. ' +
+      'Si solo usas el servidor, revisa VITE_* y despliega la función: npx supabase functions deploy ' +
+      functionName,
+  ].join('');
+}
+
+/** Same value as APIFY_ACTORS.LINKEDIN_JOBS (declared later in this file). */
+const LINKEDIN_JOBS_ACTOR_ID = 'harvestapi/linkedin-job-search';
+
+function readViteApifyToken(): string | undefined {
+  const v = import.meta.env.VITE_APIFY_API_TOKEN;
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+/**
+ * Key used for browser-side Apify calls: optional VITE_APIFY_API_TOKEN first, else `api_keys` row for the user.
+ */
+export async function getApifyApiKeyForBrowser(): Promise<string | null> {
+  const vite = readViteApifyToken();
+  if (vite) return vite;
+  if (!supabase) return null;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await supabase
+    .from('api_keys')
+    .select('api_key_encrypted')
+    .eq('user_id', user.id)
+    .eq('service', 'apify')
+    .eq('is_active', true)
+    .maybeSingle();
+  if (error || !data?.api_key_encrypted) return null;
+  return data.api_key_encrypted;
+}
+
+async function userHasActiveApifyKeyInSettings(): Promise<boolean> {
+  return (await getApifyApiKeyForBrowser()) != null;
+}
 
 /** Params for running LinkedIn job search (HarvestAPI). From New Search form or saved_searches.input */
 export interface RunLinkedInSearchInput {
@@ -26,6 +196,10 @@ export interface RunLinkedInSearchResult {
   /** Edge function auto-creates one on New Search runs; null if fallback/local run. */
   savedSearchId?: string | null;
   savedSearchName?: string | null;
+  /** True when Apify run continues in the cloud and leads import via webhook (no Edge timeout). */
+  async?: boolean;
+  apifyRunId?: string;
+  message?: string;
 }
 
 /** Params for running LinkedIn post feed search (HarvestAPI). From New Search form or saved_searches.input */
@@ -45,24 +219,9 @@ export interface RunLinkedInPostFeedInput {
 
 /**
  * Run job search via Edge Function (API key stays in Edge Function Secrets).
- * Uses fetch so we can always read the response body and show the real error on non-2xx.
- * If the Edge Function is not deployed or unreachable, falls back to runJobSearch (requires Apify key in api_keys table).
+ * Uses `supabase.functions.invoke` so headers match the rest of the SDK (apikey + user JWT).
+ * If the function is unreachable, falls back to runJobSearch (Apify key in api_keys).
  */
-async function fetchWithAuth(
-  url: string,
-  body: Record<string, unknown>,
-  token: string
-): Promise<Response> {
-  return fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  });
-}
-
 export async function runJobSearchViaEdge(options: {
   actorId: string;
   input?: Record<string, unknown>;
@@ -70,103 +229,130 @@ export async function runJobSearchViaEdge(options: {
 }): Promise<RunLinkedInSearchResult> {
   if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
   const db = supabase;
-  const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/run-job-search`;
 
-  const getToken = async (): Promise<string> => {
-    const { data: { session }, error: refreshError } = await db.auth.refreshSession();
-    if (refreshError || !session?.user) {
-      throw new Error('You must be logged in to run a search. Please sign in again.');
-    }
-    const token = session.access_token;
-    if (!token) throw new Error('Session expired. Please sign in again.');
-    return token;
-  };
-
-  let token = await getToken();
-  let response: Response;
-  try {
-    response = await fetchWithAuth(url, options, token);
-    if (response.status === 401) {
-      token = await getToken();
-      response = await fetchWithAuth(url, options, token);
-    }
-  } catch (networkErr) {
-    const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
-    const isUnreachable = /fetch failed|NetworkError|Failed to fetch/i.test(msg);
-    if (isUnreachable) {
-      try {
-        return await runJobSearch(options);
-      } catch (fallbackErr) {
-        const detail = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-        const needKey =
-          /API key not configured|add it in Settings/i.test(detail);
-        throw new Error(
-          needKey
-            ? `Edge Function is not deployed. Either: (1) Run "supabase functions deploy run-job-search" and set APIFY_API_TOKEN in Edge Function Secrets, or (2) Add your Apify key in the api_keys table (Supabase Table Editor). Details: ${detail}`
-            : `Edge Function unreachable. Deploy with: supabase functions deploy run-job-search and set APIFY_API_TOKEN in Secrets. If you use the fallback, add your Apify key in the api_keys table. Details: ${detail}`
-        );
-      }
-    }
-    throw new Error(msg);
+  // LinkedIn Jobs: if Apify key exists in Settings, run in the browser only — no Edge Function, no JWT to the gateway.
+  if (options.actorId === LINKEDIN_JOBS_ACTOR_ID && (await userHasActiveApifyKeyInSettings())) {
+    const direct = await runJobSearch(options);
+    return {
+      ...direct,
+      message:
+        direct.message ??
+        'Búsqueda con tu API key de Apify (navegador). No usa la Edge Function; así se evitan errores JWT del servidor.',
+    };
   }
 
-  const text = await response.text();
-  let body: {
-    error?: string | { code?: number; message?: string };
-    message?: string | Record<string, unknown>;
-    scrapingJobId?: string;
-    imported?: number;
-    skipped?: number;
-    totalFromApify?: number;
-    savedSearchId?: string | null;
-    savedSearchName?: string | null;
-  };
-  try {
-    body = text ? (JSON.parse(text) as typeof body) : {};
-  } catch {
-    body = {};
-  }
-  /** Always return a string for the user; avoid [object Object]. */
-  const toErrorString = (v: unknown): string => {
-    if (typeof v === 'string') return v;
-    if (v && typeof v === 'object' && 'message' in v && typeof (v as { message: unknown }).message === 'string')
-      return (v as { message: string }).message;
-    return v != null ? String(v) : '';
-  };
-  if (!response.ok) {
-    const raw =
-      typeof body?.error === 'string'
-        ? body.error
-        : typeof body?.message === 'string'
+  const bodyPayload: Record<string, unknown> = { actorId: options.actorId };
+  if (options.input !== undefined) bodyPayload.input = options.input;
+  if (options.savedSearchId !== undefined) bodyPayload.savedSearchId = options.savedSearchId;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const accessToken = await getFreshAccessTokenForEdge(db);
+    const { data, error } = await db.functions.invoke('run-job-search', {
+      body: bodyPayload,
+      headers: edgeInvokeHeaders(accessToken),
+    });
+
+    if (!error) {
+      const body = data as {
+        error?: unknown;
+        message?: string | Record<string, unknown>;
+        scrapingJobId?: string;
+        imported?: number;
+        skipped?: number;
+        totalFromApify?: number;
+        savedSearchId?: string | null;
+        savedSearchName?: string | null;
+        async?: boolean;
+        apifyRunId?: string;
+      } | null;
+      if (body?.error != null) throw new Error(edgeBodyErrorToString(body.error));
+      if (body?.scrapingJobId == null) throw new Error('Invalid response from run-job-search.');
+      const msg =
+        typeof body.message === 'string'
           ? body.message
-          : body?.error != null
-            ? toErrorString(body.error)
-            : body?.message != null
-              ? toErrorString(body.message)
-              : text || `Edge Function returned ${response.status}`;
-    let message = toErrorString(raw);
-    if (!message) message = text || `Edge Function returned ${response.status}`;
-    if (response.status === 401) {
-      if (/Invalid JWT|invalid.*jwt|unauthorized|expired|session expired/i.test(message)) {
-        message =
-          'Sesión no reconocida (a veces por la migración JWT en Supabase). Solución: en la raíz del proyecto ejecuta: npx supabase functions deploy run-job-search --no-verify-jwt. Luego cierra sesión, vuelve a entrar y prueba de nuevo.';
-      } else if (/must be logged in/i.test(message)) {
-        message =
-          'Sesión no reconocida. Ejecuta: npx supabase functions deploy run-job-search --no-verify-jwt. Luego cierra sesión y vuelve a entrar.';
+          : body.message != null
+            ? edgeBodyErrorToString(body.message)
+            : undefined;
+      return {
+        scrapingJobId: body.scrapingJobId,
+        imported: body.imported ?? 0,
+        skipped: body.skipped ?? 0,
+        totalFromApify: body.totalFromApify ?? 0,
+        savedSearchId: body.savedSearchId ?? null,
+        savedSearchName: body.savedSearchName ?? null,
+        async: body.async === true,
+        apifyRunId: typeof body.apifyRunId === 'string' ? body.apifyRunId : undefined,
+        message: msg,
+      };
+    }
+
+    if (error instanceof FunctionsFetchError) {
+      const msg = error.message;
+      const isUnreachable = /fetch failed|NetworkError|Failed to fetch/i.test(msg);
+      if (isUnreachable) {
+        try {
+          return await runJobSearch(options);
+        } catch (fallbackErr) {
+          const detail = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+          const needKey = /API key not configured|add it in Settings/i.test(detail);
+          throw new Error(
+            needKey
+              ? `Edge Function is not deployed. Either: (1) Run "supabase functions deploy run-job-search" and set APIFY_API_TOKEN in Edge Function Secrets, or (2) Add your Apify key in the api_keys table (Supabase Table Editor). Details: ${detail}`
+              : `Edge Function unreachable. Deploy with: supabase functions deploy run-job-search and set APIFY_API_TOKEN in Secrets. If you use the fallback, add your Apify key in the api_keys table. Details: ${detail}`,
+          );
+        }
+      }
+      throw new Error(msg);
+    }
+
+    const httpRes = getHttpResponseFromInvokeError(error);
+    if (httpRes) {
+      const { status, message } = await parseEdgeInvokeErrorResponse(httpRes);
+      if (status === 401 && attempt === 0) continue;
+
+      const tryBrowser =
+        status === 401 ||
+        status === 403 ||
+        /invalid jwt|jwt expired|session|unauthorized/i.test(message);
+      if (tryBrowser) {
+        try {
+          const direct = await runJobSearch(options);
+          return {
+            ...direct,
+            message:
+              direct.message ??
+              'Búsqueda ejecutada en modo directo (Apify desde el navegador). La Edge Function devolvió error de sesión/JWT; revisa Secrets y deploy, o deja tu API key de Apify en Ajustes.',
+          };
+        } catch (fallbackErr) {
+          const fb = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+          throw new Error(
+            `${formatEdge401('run-job-search', message)} Modo directo no disponible: ${fb}`,
+          );
+        }
+      }
+      throw new Error(message || `run-job-search returned ${status}`);
+    }
+
+    const loose = error instanceof Error ? error.message : String(error);
+    if (/invalid jwt/i.test(loose)) {
+      try {
+        const direct = await runJobSearch(options);
+        return {
+          ...direct,
+          message:
+            direct.message ??
+            'Búsqueda en modo directo (Apify en el navegador). Error al invocar la Edge Function; revisa deploy o API key en Ajustes.',
+        };
+      } catch (fallbackErr) {
+        const fb = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        throw new Error(`${formatEdge401('run-job-search', loose)} Modo directo no disponible: ${fb}`);
       }
     }
-    throw new Error(message);
+
+    throw new Error(error instanceof Error ? error.message : String(error));
   }
-  if (body?.error) throw new Error(toErrorString(body.error));
-  if (body?.scrapingJobId == null) throw new Error('Invalid response from run-job-search.');
-  return {
-    scrapingJobId: body.scrapingJobId,
-    imported: body.imported ?? 0,
-    skipped: body.skipped ?? 0,
-    totalFromApify: body.totalFromApify ?? 0,
-    savedSearchId: body.savedSearchId ?? null,
-    savedSearchName: body.savedSearchName ?? null,
-  };
+
+  throw new Error('run-job-search: session retry exhausted.');
 }
 
 /**
@@ -179,88 +365,55 @@ export async function runLinkedInPostFeedViaEdge(options: {
 }): Promise<RunLinkedInSearchResult> {
   if (!supabase || !supabaseUrl) throw new Error('Supabase not configured.');
   const db = supabase;
-  const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/run-linkedin-post-feed`;
 
-  const getToken = async (): Promise<string> => {
-    const { data: { session }, error: refreshError } = await db.auth.refreshSession();
-    if (refreshError || !session?.user) {
-      throw new Error('You must be logged in to run a search. Please sign in again.');
-    }
-    const token = session.access_token;
-    if (!token) throw new Error('Session expired. Please sign in again.');
-    return token;
-  };
+  const bodyPayload: Record<string, unknown> = {};
+  if (options.input !== undefined) bodyPayload.input = options.input;
+  if (options.savedSearchId !== undefined) bodyPayload.savedSearchId = options.savedSearchId;
 
-  let token = await getToken();
-  let response: Response;
-  try {
-    response = await fetchWithAuth(url, options, token);
-    if (response.status === 401) {
-      token = await getToken();
-      response = await fetchWithAuth(url, options, token);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const accessToken = await getFreshAccessTokenForEdge(db);
+    const { data, error } = await db.functions.invoke('run-linkedin-post-feed', {
+      body: bodyPayload,
+      headers: edgeInvokeHeaders(accessToken),
+    });
+
+    if (!error) {
+      const body = data as {
+        error?: unknown;
+        scrapingJobId?: string;
+        imported?: number;
+        skipped?: number;
+        totalFromApify?: number;
+        savedSearchId?: string | null;
+        savedSearchName?: string | null;
+      } | null;
+      if (body?.error != null) throw new Error(edgeBodyErrorToString(body.error));
+      if (body?.scrapingJobId == null) throw new Error('Invalid response from run-linkedin-post-feed.');
+      return {
+        scrapingJobId: body.scrapingJobId,
+        imported: body.imported ?? 0,
+        skipped: body.skipped ?? 0,
+        totalFromApify: body.totalFromApify ?? 0,
+        savedSearchId: body.savedSearchId ?? null,
+        savedSearchName: body.savedSearchName ?? null,
+      };
     }
-  } catch (networkErr) {
-    const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
-    throw new Error(msg);
+
+    if (error instanceof FunctionsFetchError) {
+      throw new Error(error.message);
+    }
+
+    if (error instanceof FunctionsHttpError) {
+      const { status, message } = await parseFunctionsHttpError(error);
+      if (status === 401 && attempt === 0) continue;
+      if (status === 401) throw new Error(formatEdge401('run-linkedin-post-feed', message));
+      throw new Error(message || `run-linkedin-post-feed returned ${status}`);
+    }
+
+    throw new Error(error instanceof Error ? error.message : String(error));
   }
 
-  const text = await response.text();
-  let body: {
-    error?: string | { code?: number; message?: string };
-    message?: string | Record<string, unknown>;
-    scrapingJobId?: string;
-    imported?: number;
-    skipped?: number;
-    totalFromApify?: number;
-    savedSearchId?: string | null;
-    savedSearchName?: string | null;
-  };
-  try {
-    body = text ? (JSON.parse(text) as typeof body) : {};
-  } catch {
-    body = {};
-  }
-  /** Always return a string for the user; avoid [object Object]. */
-  const toErrorString = (v: unknown): string => {
-    if (typeof v === 'string') return v;
-    if (v && typeof v === 'object' && 'message' in v && typeof (v as { message: unknown }).message === 'string')
-      return (v as { message: string }).message;
-    return v != null ? String(v) : '';
-  };
-  if (!response.ok) {
-    const raw =
-      typeof body?.error === 'string'
-        ? body.error
-        : typeof body?.message === 'string'
-          ? body.message
-          : body?.error != null
-            ? toErrorString(body.error)
-            : body?.message != null
-              ? toErrorString(body.message)
-              : text || `Edge Function returned ${response.status}`;
-    let message = toErrorString(raw);
-    if (!message) message = text || `Edge Function returned ${response.status}`;
-    if (response.status === 401) {
-      if (/Invalid JWT|invalid.*jwt|unauthorized|expired|session expired/i.test(message)) {
-        message =
-          'Sesión no reconocida (a veces por la migración JWT en Supabase). Solución: despliega la función sin verificación JWT: npx supabase functions deploy run-linkedin-post-feed --no-verify-jwt. Luego cierra sesión, vuelve a entrar y prueba de nuevo.';
-      } else if (/must be logged in/i.test(message)) {
-        message =
-          'Sesión no reconocida. Ejecuta: npx supabase functions deploy run-linkedin-post-feed --no-verify-jwt. Luego cierra sesión y vuelve a entrar.';
-      }
-    }
-    throw new Error(message);
-  }
-  if (body?.error) throw new Error(toErrorString(body.error));
-  if (body?.scrapingJobId == null) throw new Error('Invalid response from run-linkedin-post-feed.');
-  return {
-    scrapingJobId: body.scrapingJobId,
-    imported: body.imported ?? 0,
-    skipped: body.skipped ?? 0,
-    totalFromApify: body.totalFromApify ?? 0,
-    savedSearchId: body.savedSearchId ?? null,
-    savedSearchName: body.savedSearchName ?? null,
-  };
+  throw new Error('run-linkedin-post-feed: session retry exhausted.');
 }
 
 /**
@@ -393,20 +546,14 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      headers: edgeFunctionPostHeaders(token),
       body: JSON.stringify({ leadIds }),
     });
     if (response.status === 401) {
       token = await getToken();
       response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: edgeFunctionPostHeaders(token),
         body: JSON.stringify({ leadIds }),
       });
     }
@@ -442,7 +589,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
     const personaUrl = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/enrich-lead-personas`;
     const personaRes = await fetch(personaUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: edgeFunctionPostHeaders(token),
       body: JSON.stringify({ leadIds }),
     });
     const personaText = await personaRes.text();
@@ -493,14 +640,14 @@ export async function enrichLeadsWithPersonas(leadIds: string[]): Promise<{
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: edgeFunctionPostHeaders(token),
       body: JSON.stringify({ leadIds }),
     });
     if (response.status === 401) {
       token = await getToken();
       response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: edgeFunctionPostHeaders(token),
         body: JSON.stringify({ leadIds }),
       });
     }
@@ -545,10 +692,7 @@ export async function recomputeLeadScores(leadIds?: string[]): Promise<{ updated
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      headers: edgeFunctionPostHeaders(token),
       body: JSON.stringify(leadIds != null ? { leadIds } : {}),
     });
   } catch (networkErr) {
@@ -571,7 +715,7 @@ export async function recomputeLeadScores(leadIds?: string[]): Promise<{ updated
   if (!response.ok) {
     if (response.status === 401 && (body?.code === 401 || body?.message?.toLowerCase().includes('jwt'))) {
       throw new Error(
-        'Invalid or expired session. Sign out, sign in again, then try Recalculate scores. If it persists, deploy with: npx supabase functions deploy recompute-lead-scores --no-verify-jwt'
+        'Invalid or expired session, or VITE_SUPABASE_ANON_KEY does not match this project. Sign out and sign in again, then try Recalculate scores. Deploy if needed: npx supabase functions deploy recompute-lead-scores'
       );
     }
     const errMsg =
@@ -757,7 +901,9 @@ export class ApifyClient {
       maxItems: params.maxItems ?? 50,
       sortBy: params.sort ?? 'date',
     };
-    if (workplaceMerged.size > 0) input.workplaceType = [...workplaceMerged];
+    if (workplaceMerged.size > 0) {
+      input.workplaceType = mapWorkplaceTypesToHarvestApi([...workplaceMerged]);
+    }
     if (params.employmentType?.length) input.employmentType = params.employmentType;
     if (params.experienceLevel?.length) input.experienceLevel = params.experienceLevel;
 
@@ -769,7 +915,7 @@ export class ApifyClient {
     let status = run.status;
     let datasetId = run.datasetId;
 
-    if (status === 'RUNNING') {
+    if (status === 'RUNNING' || status === 'READY') {
       const st = await this.pollRunUntilFinished(run.runId);
       status = st.status;
       datasetId = st.datasetId;
@@ -861,7 +1007,7 @@ export class ApifyClient {
     const run = await this.runActor({ actorId: APIFY_ACTORS.INDEED_JOBS, input });
     let status = run.status;
     let datasetId = run.datasetId;
-    if (status === 'RUNNING') {
+    if (status === 'RUNNING' || status === 'READY') {
       const st = await this.pollRunUntilFinished(run.runId);
       status = st.status;
       datasetId = st.datasetId;
@@ -899,7 +1045,7 @@ export class ApifyClient {
     const run = await this.runActor({ actorId: APIFY_ACTORS.LINKEDIN_PROFILE, input });
     let status = run.status;
     let datasetId = run.datasetId;
-    if (status === 'RUNNING') {
+    if (status === 'RUNNING' || status === 'READY') {
       const st = await this.pollRunUntilFinished(run.runId, 120_000);
       status = st.status;
       datasetId = st.datasetId;
@@ -928,20 +1074,14 @@ export async function createApifyClient(): Promise<ApifyClient> {
   const user = await getCurrentUser();
   if (!user || !supabase) throw new Error('You must be logged in.');
 
-  const { data } = await supabase
-    .from('api_keys')
-    .select('api_key_encrypted')
-    .eq('user_id', user.id)
-    .eq('service', 'apify')
-    .eq('is_active', true)
-    .single();
-
-  const apiKey = data as ApiKey | null;
-  if (!apiKey) {
-    throw new Error('Apify API key not configured. Please add it in Settings.');
+  const key = await getApifyApiKeyForBrowser();
+  if (!key) {
+    throw new Error(
+      'Apify API key not configured. Add a row in Supabase → api_keys (service apify, your user id), set VITE_APIFY_API_TOKEN, or rely on Edge APIFY_API_TOKEN.',
+    );
   }
 
-  return new ApifyClient(apiKey.api_key_encrypted);
+  return new ApifyClient(key);
 }
 
 /** Job URLs already present for this user (to avoid re-importing / re-enriching). */

@@ -194,8 +194,9 @@ export interface SavedSearch {
   actor_id: string;
   input: Record<string, unknown>;
   /** When true, search can be re-run automatically (e.g. daily) for new results only. */
+  /** Legacy column; UI no longer offers autorun (runs are manual only). */
   autorun: boolean;
-  /** Last successful run (manual or automatic); used to throttle autorun. */
+  /** Updated after each successful Run (manual); optional for analytics. */
   autorun_last_run_at?: string | null;
   created_at: string;
   updated_at: string;

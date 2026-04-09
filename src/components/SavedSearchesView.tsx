@@ -1,7 +1,7 @@
 // =====================================================
 // Leadflow Vloom - Saved searches list + Run + View outputs
 // =====================================================
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { Play, Loader2, Trash2, ArrowLeft, List, Pencil, Check, X } from 'lucide-react';
 import { useSavedSearches } from '@/hooks/useSavedSearches';
 import { useLeads } from '@/hooks/useLeads';
@@ -10,12 +10,11 @@ import { runJobSearchViaEdge, runLinkedInPostFeedViaEdge, sendSelectedToLeadsAnd
 import type { RunLinkedInSearchResult } from '@/lib/apify';
 import type { Lead, LeadStatus } from '@/types/database';
 import { supabase } from '@/lib/supabase';
+import { setLatestImportScrapingJobId, getLatestImportScrapingJobId } from '@/lib/savedSearchLatestImport';
 import { Send } from 'lucide-react';
 
 const LINKEDIN_ACTOR_ID = 'harvestapi/linkedin-job-search';
 const LINKEDIN_POST_FEED_ACTOR_ID = 'harvestapi/linkedin-post-search';
-/** Minimum time between automatic re-runs for a saved search (ms). */
-const AUTORUN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 const NON_DISQUALIFIED_STATUSES: LeadStatus[] = [
   'backlog',
@@ -70,6 +69,11 @@ function SavedSearchResultsTable({
     },
     pageSize: 500,
   });
+
+  const highlightScrapingJobId = useMemo(
+    () => getLatestImportScrapingJobId(savedSearchId),
+    [savedSearchId],
+  );
 
   const [sending, setSending] = useState(false);
   const [sendMessage, setSendMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -223,6 +227,11 @@ function SavedSearchResultsTable({
           </button>
           <span className="text-vloom-muted">·</span>
           <h3 className="text-sm font-medium text-vloom-text">Results for “{searchName}” ({totalCount})</h3>
+          {highlightScrapingJobId && (
+            <span className="text-[11px] text-vloom-muted hidden sm:inline" title="Leads from your last Run show a New badge">
+              · New = last Run
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -374,6 +383,7 @@ function SavedSearchResultsTable({
         onToggleShare={noop}
         onViewDetails={handleRowCellActivate}
         onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
+        highlightScrapingJobId={highlightScrapingJobId}
         selectionAction={
           selectedIds.size > 0 ? (
             <div className="flex items-center gap-2">
@@ -453,7 +463,7 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
   const [editingName, setEditingName] = useState('');
   const [runningId, setRunningId] = useState<string | null>(null);
   const [viewingSearchId, setViewingSearchId] = useState<string | null>(null);
-  /** Prevents overlapping manual Run and background autorun. */
+  /** Prevents double-submit while a Run request is in flight. */
   const runLockRef = useRef(false);
 
   const handleRun = useCallback(
@@ -466,6 +476,7 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
           actorId === LINKEDIN_POST_FEED_ACTOR_ID
             ? await runLinkedInPostFeedViaEdge({ savedSearchId: id })
             : await runJobSearchViaEdge({ actorId, savedSearchId: id });
+        setLatestImportScrapingJobId(id, result.scrapingJobId);
         if (supabase) {
           await supabase
             .from('saved_searches')
@@ -484,52 +495,6 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
     [onRunComplete, onRunError, refetch]
   );
 
-  // While this view is open: re-run saved searches with Autorun on at most once per cooldown.
-  useEffect(() => {
-    const db = supabase;
-    if (!db || isLoading) return;
-
-    const tick = async () => {
-      if (runLockRef.current) return;
-      const supported = savedSearches.filter(
-        (s) => s.actor_id === LINKEDIN_ACTOR_ID || s.actor_id === LINKEDIN_POST_FEED_ACTOR_ID
-      );
-      const due = supported.filter((s) => {
-        if (!s.autorun) return false;
-        const last = s.autorun_last_run_at ? new Date(s.autorun_last_run_at).getTime() : 0;
-        return Date.now() - last >= AUTORUN_COOLDOWN_MS;
-      });
-      if (due.length === 0) return;
-
-      for (const s of due) {
-        if (runLockRef.current) break;
-        runLockRef.current = true;
-        setRunningId(s.id);
-        try {
-          const result =
-            s.actor_id === LINKEDIN_POST_FEED_ACTOR_ID
-              ? await runLinkedInPostFeedViaEdge({ savedSearchId: s.id })
-              : await runJobSearchViaEdge({ actorId: s.actor_id, savedSearchId: s.id });
-          await db
-            .from('saved_searches')
-            .update({ autorun_last_run_at: new Date().toISOString() } as never)
-            .eq('id', s.id);
-          await refetch();
-          console.info('[autorun] completed', s.name, 'imported', result.imported);
-        } catch (e) {
-          console.error('[autorun] failed', s.id, e);
-        } finally {
-          setRunningId(null);
-          runLockRef.current = false;
-        }
-      }
-    };
-
-    void tick();
-    const interval = setInterval(tick, 15 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [isLoading, savedSearches, refetch]);
-
   const supportedSearches = savedSearches.filter(
     (s) => s.actor_id === LINKEDIN_ACTOR_ID || s.actor_id === LINKEDIN_POST_FEED_ACTOR_ID
   );
@@ -541,7 +506,9 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
     <div className="p-4 md:p-6">
       <h1 className="text-lg font-semibold text-vloom-text mb-4">Saved searches</h1>
       <p className="text-sm text-vloom-muted mb-4">
-        Re-run a saved search with one click. Supported: LinkedIn Jobs and LinkedIn Post Feeds (HarvestAPI).
+        Run a saved search manually with the Run button. Supported: LinkedIn Jobs and LinkedIn Post Feeds (HarvestAPI).
+        After a run, new rows show a <span className="text-vloom-text font-medium">New</span> badge next to the company
+        in results until the next run.
       </p>
 
       {!supabase && (
@@ -674,18 +641,6 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
                   >
                     <Pencil className="w-4 h-4" />
                   </button>
-                  <label
-                    className="flex items-center gap-2 text-sm text-vloom-muted cursor-pointer"
-                    title="While this screen is open, re-runs about once per 24 hours. Uses last run time (including manual Run)."
-                  >
-                    <span>Autorun</span>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(s.autorun)}
-                      onChange={(e) => updateSavedSearch(s.id, { autorun: e.target.checked })}
-                      className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent"
-                    />
-                  </label>
                   <button
                     type="button"
                     onClick={() => handleRun(s.id, s.actor_id)}

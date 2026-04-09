@@ -44,6 +44,8 @@ interface LeadsTableProps {
   groupSizeByLeadId?: Record<string, number>;
   /** Optional action to show in the header when there are selected rows (e.g. "Send to leads" button). */
   selectionAction?: React.ReactNode;
+  /** When set, leads whose `scraping_job_id` matches show a "New" badge (e.g. last Run for a saved search). */
+  highlightScrapingJobId?: string | null;
 }
 
 // Default columns (enriched company fields + enrichment_data columns)
@@ -391,6 +393,7 @@ export function LeadsTable({
   onMarkAsLead,
   groupSizeByLeadId = {},
   selectionAction,
+  highlightScrapingJobId = null,
 }: LeadsTableProps) {
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [showColumnPicker, setShowColumnPicker] = useState(false);
@@ -510,14 +513,26 @@ export function LeadsTable({
         const groupSize = groupSizeByLeadId[lead.id];
         const nameWithCount = groupSize && groupSize > 1 ? `${name} (${groupSize})` : name;
         const initial = nameStr ? nameStr[0].toUpperCase() : '?';
+        const showNew =
+          Boolean(highlightScrapingJobId) &&
+          lead.scraping_job_id != null &&
+          lead.scraping_job_id === highlightScrapingJobId;
         return (
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-vloom-border/50 flex items-center justify-center text-xs font-medium text-vloom-muted">
               {initial}
             </div>
             <div className="min-w-0">
-              <div className="font-medium text-vloom-text truncate max-w-[200px]">
-                {nameWithCount}
+              <div className="font-medium text-vloom-text truncate max-w-[260px] flex items-center gap-2 flex-wrap">
+                <span className="truncate">{nameWithCount}</span>
+                {showNew && (
+                  <span
+                    className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-vloom-accent/15 text-vloom-accent border border-vloom-accent/35"
+                    title="Imported on the last Run for this saved search"
+                  >
+                    New
+                  </span>
+                )}
               </div>
               {lead.company_url && (() => {
                 try {

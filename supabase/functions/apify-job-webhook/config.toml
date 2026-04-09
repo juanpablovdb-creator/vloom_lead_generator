@@ -1,0 +1,2 @@
+# Apify calls this endpoint (no user JWT). Validate with APIFY_WEBHOOK_SECRET (query param).
+verify_jwt = false

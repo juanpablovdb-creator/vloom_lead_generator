@@ -36,6 +36,48 @@ The app uses the **Edge Function** `run-job-search`, which reads the Apify key f
 
 The Edge Function reads it with `Deno.env.get('APIFY_API_TOKEN')` and never exposes it to the frontend.
 
+**If New Search fails with “Invalid JWT”:**
+
+> Scope: this appears when you run **LinkedIn Jobs** (Discovery → New Search → start search). That path is the only one that calls the Edge Function **`run-job-search`** (`runJobSearchViaEdge` in the app). Post Feeds and other sources use different functions.
+
+1. Ensure Edge secret **`SUPABASE_SERVICE_ROLE_KEY`** exists (Project Settings → API → `service_role`). Same as for §3b / `apify-job-webhook`.
+2. **`SUPABASE_URL` and `SUPABASE_ANON_KEY` in Edge → Secrets are reserved** (managed by Supabase for your project). You **cannot delete** them; they always match this project. If you still see “Invalid JWT”, the usual causes are: **stale session** (sign out, clear site data for your app domain, sign in again), or the **frontend** using another project’s URL/anon key.
+3. **Frontend:** `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in Vercel / `.env` must match **Project Settings → API** for this same project. After changing env vars, **redeploy** the frontend (Vite bakes them in at build time).
+4. **Logs — where to see the root cause**
+
+   - **Supabase Dashboard:** **Edge Functions** → **`run-job-search`** → **Logs** (wording may vary: *Invocations*, *Observability*). This project logs `[run-job-search] request` at the start of each invocation. On auth failure, `_shared/resolveUserAndClient.ts` emits **`[resolveUserAndClient] getClaims:`** or **`GET /auth/v1/user:`** or **`admin auth.getUser(jwt):`** — those lines are more specific than the generic “Invalid JWT” shown in the UI.
+   - **Interpretation:** If your attempt **never** produces **`[run-job-search] request`**, the gateway may be rejecting the JWT **before** Deno runs (or the function name/region is wrong). This repo sets **`verify_jwt = false`** in `supabase/functions/run-job-search/config.toml` so validation happens inside the function; if production was deployed without that file, redeploy: `npx supabase functions deploy run-job-search`.
+   - **Browser:** DevTools → **Network** → the `run-job-search` request → **Response** (and **Headers** for status). The JSON body is the same error the frontend surfaces.
+   - **CLI (optional):** `npx supabase functions logs run-job-search --project-ref <your-project-ref>` (CLI must be logged in to the project).
+
+   **Note:** “Invalid JWT” almost always refers to the **user session token** sent to Supabase Auth / Edge, not the Apify API token. Auth **event** logs in the dashboard (where available) can also show token validation issues.
+
+5. **Gateway JWT vs in-function checks (Supabase “Securing Edge Functions”)**
+
+   - **Built-in verification (recommended by Supabase):** the platform validates the JWT **before** your Edge code runs. Invalid/expired/missing token → **401**, and Invocations may show **`execution_id: null`** because the handler never started. That matches what “enforce JWT” means: reject early at the edge.
+   - **Skipping gateway checks:** historically via `verify_jwt` in `config.toml`; follow Supabase’s current docs for **JWT Signing Keys** if you toggle this. This repo sets **`verify_jwt = false`** on some functions so **`resolveUserAndClient`** can validate with `getClaims` / Auth HTTP fallbacks inside the function — a **trade-off** for debugging migrations, not a replacement for sending a **valid** session JWT from the app.
+   - **Custom verification:** verify signature against **JWKS** at `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json` (e.g. with `jose`). Our shared code uses the Supabase JS **`auth.getClaims`** path and fallbacks instead of embedding `jose` in every function.
+
+**Local dev console:** `net::ERR_CONNECTION_REFUSED` on **`http://localhost:5173`** means the **Vite** dev server is not running (or a tab is still pointing at localhost). Run `npm run dev` from the repo root, or close that tab if you are only using the deployed app — those errors are unrelated to Supabase JWT.
+
+---
+
+## 3b. Background import (LinkedIn Jobs — recommended for long runs)
+
+Long Apify runs can exceed the Edge Function wall-clock limit (~150s on free tier). When configured, **LinkedIn Jobs** starts the actor with **ad-hoc webhooks**: Apify calls your project when the run **succeeds or fails**, and **`apify-job-webhook`** imports the dataset using the **service role** (no user session needed).
+
+1. **Edge Function Secrets** (same place as `APIFY_API_TOKEN`):
+   - **`APIFY_WEBHOOK_SECRET`** — long random string (e.g. 32+ chars). Apify’s webhook URL will include `?secret=...`; the handler rejects requests without a match.
+   - **`SUPABASE_SERVICE_ROLE_KEY`** — from Supabase **Project Settings → API** (service_role key). Used only inside `apify-job-webhook` to insert leads and update `scraping_jobs` for the correct user.
+
+2. **Deploy** the webhook function (and redeploy `run-job-search` after pulling the latest code):
+
+   ```bash
+   npx supabase functions deploy run-job-search apify-job-webhook
+   ```
+
+3. **Behaviour:** If both secrets are set, `run-job-search` returns immediately with `async: true` and saves `run_id` on the scraping job. The UI shows a short message; refresh **Results** when the run finishes. If the secrets are **not** set, the app keeps the previous **synchronous** behaviour (wait + poll inside one invocation).
+
 ---
 
 ## 4. Permissions (RLS)
@@ -97,9 +139,9 @@ The app first calls the Edge Function; if that fails (e.g. not deployed or wrong
 The Supabase gateway may reject your JWT (e.g. with newer JWT signing). Deploy the function **without** gateway JWT verification; the function still checks the user with `getUser(token)`:
 
 ```bash
-supabase functions deploy run-job-search
+supabase functions deploy run-job-search --no-verify-jwt
 ```
 
-If your Supabase CLI ignores the function config, deploy with `--no-verify-jwt`.
+If you prefer, you can still try a normal deploy first, but **when you see POST 401 with `execution_id: null` in Invocations**, this `--no-verify-jwt` deploy is the first fix to try.
 
 Then run the search again (sign in again if needed).

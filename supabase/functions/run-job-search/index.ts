@@ -2,13 +2,13 @@
 // Receives: actorId, input?, savedSearchId?. Uses JWT for Supabase RLS.
 // Returns: { scrapingJobId, imported, skipped, totalFromApify, savedSearchId?, savedSearchName? }.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeLeadScore } from "../_shared/leadScore.ts";
-import { loadExistingLeadDedupeKeys } from "../_shared/loadExistingLeadDedupeKeys.ts";
+import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
+import { importLinkedInJobsFromItems } from "../_shared/linkedinJobImport.ts";
+import { mapWorkplaceTypesToHarvestApi } from "../_shared/mapHarvestWorkplaceTypes.ts";
+import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const LINKEDIN_JOBS_ACTOR = "harvestapi/linkedin-job-search";
-const LINKEDIN_JOB_POST_CHANNEL = "LinkedIn Job Post";
 
 /** API docs: actorId is username~actor-name (tilde). Normalize slash to tilde for URL. */
 function toApifyActorId(actorId: string): string {
@@ -24,39 +24,6 @@ interface RequestBody {
   actorId: string;
   input?: Record<string, unknown>;
   savedSearchId?: string;
-}
-
-function normalizeDomain(raw: string): string {
-  try {
-    const trimmed = raw.trim();
-    if (!trimmed) return "";
-    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-    const url = new URL(withProtocol);
-    const host = url.hostname.toLowerCase();
-    return host.startsWith("www.") ? host.slice(4) : host;
-  } catch {
-    const cleaned = raw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "");
-    return cleaned.split("/")[0];
-  }
-}
-
-interface JobResult {
-  title: string;
-  company: string;
-  companyUrl?: string;
-  companyLinkedinUrl?: string;
-  companyDescription?: string;
-  companySize?: string;
-  companyWebsite?: string;
-  location?: string;
-  salary?: string;
-  description?: string;
-  url: string;
-  postedAt?: string;
-  source: string;
-  externalId?: string;
-  /** Recruiter / job poster name if the actor returns it (e.g. recruiterName, poster.name). */
-  recruiterName?: string;
 }
 
 function toArray(v: unknown): string[] {
@@ -108,83 +75,6 @@ function splitRemoteFromLocations(
   return { geoLocations: geo, workplaceTypes: [...workplace] };
 }
 
-function str(v: unknown): string {
-  if (v == null) return "";
-  if (typeof v === "string") return v;
-  return String(v);
-}
-
-function normalizeHarvestApiJobs(items: Record<string, unknown>[]): JobResult[] {
-  return items.map((item) => {
-    const company = item.company as Record<string, unknown> | undefined;
-    const companyName =
-      str(company?.name) || str(item.companyName) || str(item.company) || "";
-    const locationObj = item.location as Record<string, unknown> | undefined;
-    const locationText =
-      str(locationObj?.linkedinText) ||
-      str((locationObj?.parsed as Record<string, unknown>)?.text) ||
-      str(item.location) ||
-      "";
-    const salaryObj = item.salary as Record<string, unknown> | undefined;
-    const salaryText = str(salaryObj?.text) || str(item.salary) || "";
-    const externalId = item.id != null ? str(item.id) : (item.externalId != null ? str(item.externalId) : undefined);
-    let url =
-      str(item.linkedinUrl) ||
-      str(item.linkedin_url) ||
-      str(item.url) ||
-      str(item.jobUrl) ||
-      str(item.link);
-    if (!url && externalId) url = `https://www.linkedin.com/jobs/view/${externalId}/`;
-    const postedDate = str(item.postedDate) || str(item.postedAt) || "";
-    const employeeCount = company?.employeeCount as number | undefined;
-    const companySize =
-      employeeCount != null
-        ? employeeCount <= 10
-          ? "1-10"
-          : employeeCount <= 50
-            ? "11-50"
-            : employeeCount <= 200
-              ? "51-200"
-              : employeeCount <= 500
-                ? "201-500"
-                : "501+"
-        : undefined;
-
-    const poster = item.poster as Record<string, unknown> | undefined;
-    const jobPoster = item.jobPoster as Record<string, unknown> | undefined;
-    const hiringTeam = item.hiringTeam as Array<{ name?: string }> | undefined;
-    const recruiterName =
-      str(item.recruiterName) ||
-      str(item.posterName) ||
-      (poster && "name" in poster ? str(poster.name) : "") ||
-      (jobPoster && "name" in jobPoster ? str(jobPoster.name) : "") ||
-      (Array.isArray(hiringTeam) && hiringTeam[0]?.name ? str(hiringTeam[0].name) : "");
-
-    return {
-      title: str(item.title) || str(item.jobTitle) || str(item.Title) || "Job",
-      company: companyName,
-      companyUrl: str(company?.linkedinUrl) || str(item.companyUrl) || "",
-      companyLinkedinUrl: str(company?.linkedinUrl) || "",
-      companyDescription: str(company?.description) || str(item.companyDescription) || "",
-      companySize,
-      companyWebsite: str(company?.website) || str(item.companyWebsite) || "",
-      location: locationText,
-      salary: salaryText,
-      recruiterName: recruiterName || undefined,
-      description:
-        str(item.descriptionText) ||
-        str(item.description) ||
-        str(item.jobDescription) ||
-        str(item.descriptionHtml) ||
-        "",
-      url,
-      postedAt: postedDate,
-      source: "linkedin",
-      externalId: externalId || undefined,
-    } as JobResult;
-  });
-}
-
 Deno.serve(async (req: Request) => {
   console.log("[run-job-search] request", req.method, req.url);
   // CORS preflight
@@ -208,23 +98,17 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const supabase = createClient(
-    Deno.env.get("SUPABASE_URL") ?? "",
-    Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-    { global: { headers: { Authorization: authHeader } } }
-  );
-
-  const jwt = authHeader.replace("Bearer ", "").trim();
-  const { data: { user }, error: userError } = await supabase.auth.getUser(jwt);
-  if (userError || !user) {
-    const reason = userError?.message?.toLowerCase().includes("expired")
-      ? "Session expired. Please sign in again."
-      : userError?.message ?? "You must be logged in to run a search.";
-    return new Response(JSON.stringify({ error: reason }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+    const resolved = await resolveUserAndClient(authHeader);
+    if (!resolved.ok) {
+      const reason = resolved.message.toLowerCase().includes("expired")
+        ? "Session expired. Please sign in again."
+        : resolved.message;
+      return new Response(JSON.stringify({ error: reason }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const { user, supabase } = resolved;
 
   let body: RequestBody;
   try {
@@ -299,14 +183,17 @@ Deno.serve(async (req: Request) => {
     postedLimit: params.postedLimit,
     maxItems: params.maxItems,
     sort: params.sort,
+    excludeDomains: params.excludeDomains,
   };
 
   // Auto-save every run so paid Apify data is always stored under a saved search
   let resolvedSavedSearchId: string | null = savedSearchId ?? null;
   if (!resolvedSavedSearchId) {
     const now = new Date();
-    const dateStr = now.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-    const timeStr = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    // Use a fixed UTC-5 timezone for naming (matches business timezone regardless of server region).
+    const timeZone = "America/Bogota";
+    const dateStr = now.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone });
+    const timeStr = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone });
     const firstTitle = params.jobTitles?.[0]?.trim() || "LinkedIn Jobs";
     const autoName = `${firstTitle} – ${dateStr}, ${timeStr}`;
     const { data: savedRow, error: savedErr } = await supabase
@@ -381,20 +268,13 @@ Deno.serve(async (req: Request) => {
       maxItems: params.maxItems ?? 500,
       sortBy: (params.sort as string) ?? "date",
     };
-    if (workplaceTypes.length > 0) apifyInput.workplaceType = workplaceTypes;
+    const mappedWorkplace = mapWorkplaceTypesToHarvestApi(workplaceTypes);
+    if (mappedWorkplace.length > 0) apifyInput.workplaceType = mappedWorkplace;
     if (et.length > 0) apifyInput.employmentType = et;
     if (el.length > 0) apifyInput.experienceLevel = el;
     const actorIdForUrl = toApifyActorId(LINKEDIN_JOBS_ACTOR);
-    const runUrl = `${APIFY_BASE_URL}/acts/${actorIdForUrl}/runs?waitForFinish=60`;
-    const runRes = await fetch(runUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiToken}`,
-      },
-      body: JSON.stringify(apifyInput),
-    });
-    if (!runRes.ok) {
+
+    const parseApifyRunError = async (runRes: Response): Promise<never> => {
       const errText = await runRes.text();
       let msg = errText;
       try {
@@ -404,14 +284,81 @@ Deno.serve(async (req: Request) => {
         // use errText as-is
       }
       throw new Error(`Apify run failed: ${msg}`);
+    };
+
+    const startApifyRun = async (runUrl: string) => {
+      const runRes = await fetch(runUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiToken}`,
+        },
+        body: JSON.stringify(apifyInput),
+      });
+      if (!runRes.ok) await parseApifyRunError(runRes);
+      return runRes.json() as Promise<{ data?: { id?: string; defaultDatasetId?: string; status?: string } }>;
+    };
+
+    const webhookSecret = Deno.env.get("APIFY_WEBHOOK_SECRET");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseUrlBase = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/$/, "");
+
+    if (webhookSecret && serviceRoleKey && supabaseUrlBase.length > 0) {
+      const webhookUrl =
+        `${supabaseUrlBase}/functions/v1/apify-job-webhook?secret=${encodeURIComponent(webhookSecret)}`;
+      const webhooksPayload = [
+        {
+          eventTypes: [
+            "ACTOR.RUN.SUCCEEDED",
+            "ACTOR.RUN.FAILED",
+            "ACTOR.RUN.ABORTED",
+            "ACTOR.RUN.TIMED_OUT",
+            "ACTOR.RUN.TIMED-OUT",
+          ],
+          requestUrl: webhookUrl,
+        },
+      ];
+      const webhooksParam = btoa(JSON.stringify(webhooksPayload));
+      const asyncRunUrl =
+        `${APIFY_BASE_URL}/acts/${actorIdForUrl}/runs?waitForFinish=0&webhooks=${encodeURIComponent(webhooksParam)}`;
+      const asyncRunData = await startApifyRun(asyncRunUrl);
+      const asyncRunId = asyncRunData?.data?.id;
+      if (!asyncRunId) throw new Error("Apify did not return a run id.");
+      const { error: runUpdateErr } = await supabase
+        .from("scraping_jobs")
+        .update({ run_id: asyncRunId })
+        .eq("id", scrapingJobId);
+      if (runUpdateErr) {
+        console.error("[run-job-search] failed to save run_id", runUpdateErr.message);
+        throw new Error(runUpdateErr.message);
+      }
+      console.log("[run-job-search] async mode, run_id", asyncRunId);
+      return new Response(
+        JSON.stringify({
+          async: true,
+          scrapingJobId,
+          apifyRunId: asyncRunId,
+          imported: 0,
+          skipped: 0,
+          totalFromApify: 0,
+          savedSearchId: resolvedSavedSearchId,
+          savedSearchName: resolvedSavedSearchName,
+          message:
+            "Search started. Leads import when Apify finishes (webhook). Refresh Leads in a few minutes.",
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
-    const runData = await runRes.json();
+
+    const runUrl = `${APIFY_BASE_URL}/acts/${actorIdForUrl}/runs?waitForFinish=60`;
+    const runData = await startApifyRun(runUrl);
     const runId = runData?.data?.id;
     const datasetId = runData?.data?.defaultDatasetId;
-    const status = runData?.data?.status;
+    const statusRaw = runData?.data?.status;
+    const status = normalizeApifyRunStatus(statusRaw);
 
     if (status !== "SUCCEEDED" && status !== "RUNNING" && status !== "READY") {
-      throw new Error(`Apify run status: ${status}`);
+      throw new Error(`Apify run status: ${(statusRaw ?? status) || "unknown"}`);
     }
     let resolvedDatasetId = datasetId;
     if (status === "SUCCEEDED" && !resolvedDatasetId && runId) {
@@ -457,7 +404,7 @@ Deno.serve(async (req: Request) => {
           throw new Error(msg ?? "Failed to get run status");
         }
         const statusData = await statusRes.json();
-        const s = statusData?.data?.status;
+        const s = normalizeApifyRunStatus(statusData?.data?.status);
         if (s === "SUCCEEDED") {
           const dsRes = await fetch(
             `${APIFY_BASE_URL}/datasets/${statusData.data.defaultDatasetId}/items?format=json`,
@@ -482,176 +429,34 @@ Deno.serve(async (req: Request) => {
           headers: apifyHeaders,
         });
         const finalData = finalRes.ok ? await finalRes.json() : null;
-        const fs = finalData?.data?.status ?? "UNKNOWN";
+        const fs = finalData?.data?.status != null
+          ? String(finalData.data.status)
+          : "UNKNOWN";
         throw new Error(
           `Apify run did not finish in time (last status: ${fs}). Try again or check the run in Apify Console.`,
         );
       }
     }
 
-    let jobs = normalizeHarvestApiJobs(items);
-
-    // Optional: exclude companies by domain (e.g. staffing agencies).
-    const excludeDomainsRaw = params.excludeDomains;
-    const excludeList = Array.isArray(excludeDomainsRaw)
-      ? (excludeDomainsRaw as unknown[]).map((v) => String(v))
-      : typeof excludeDomainsRaw === "string"
-        ? toArray(excludeDomainsRaw)
-        : [];
-    const normalizedExclude = new Set(
-      excludeList
-        .map((d) => normalizeDomain(d))
-        .filter((d) => d.length > 0),
-    );
-    if (normalizedExclude.size > 0) {
-      jobs = jobs.filter((job) => {
-        const domains: string[] = [];
-        if (job.companyWebsite) domains.push(normalizeDomain(job.companyWebsite));
-        if (job.companyUrl) domains.push(normalizeDomain(job.companyUrl));
-        return !domains.some((d) => normalizedExclude.has(d));
-      });
-    }
-
-    const totalFromApify = jobs.length;
-    console.log("[run-job-search] apify items", items.length, "normalized", jobs.length);
-
-    const { urls: existingUrls, externalIds: existingExternalIds } = await loadExistingLeadDedupeKeys(
+    console.log("[run-job-search] sync mode apify items", items.length);
+    const filtersForImport = searchFilters as Record<string, unknown>;
+    const result = await importLinkedInJobsFromItems({
       supabase,
-      user.id,
-    );
-    let newJobs = jobs.filter((j) => {
-      if (!j.url) return false;
-      if (existingUrls.has(j.url)) return false;
-      if (j.externalId && existingExternalIds.has(j.externalId)) return false;
-      return true;
+      scrapingJobId,
+      userId: user.id,
+      items,
+      searchFilters: filtersForImport,
     });
-    const seenBatchKeys = new Set<string>();
-    newJobs = newJobs.filter((j) => {
-      const key = j.externalId ? `id:${j.externalId}` : `url:${j.url}`;
-      if (seenBatchKeys.has(key)) return false;
-      seenBatchKeys.add(key);
-      return true;
-    });
-    console.log(
-      "[run-job-search] new jobs to insert",
-      newJobs.length,
-      "existing urls",
-      existingUrls.size,
-      "existing job_external_id",
-      existingExternalIds.size,
-    );
-
-    const leadsToInsert = newJobs.map((job) => {
-      const enrichment_data: Record<string, unknown> = {};
-      if (job.companySize != null) enrichment_data.companySize = job.companySize;
-      if (job.companyWebsite != null) enrichment_data.companyWebsite = job.companyWebsite;
-      if (job.externalId != null) enrichment_data.externalId = job.externalId;
-      const score = computeLeadScore({
-        job_location: job.location ?? null,
-        company_location: null,
-        company_size: job.companySize ?? null,
-        company_funding: null,
-        job_description: job.description ?? null,
-        notes: null,
-        enrichment_data,
-      });
-      return {
-        user_id: user.id,
-        is_shared: false,
-        scraping_job_id: scrapingJobId,
-        job_external_id: job.externalId ?? null,
-        is_marked_as_lead: false,
-        job_title: job.title,
-        job_description: job.description ?? null,
-        job_url: job.url,
-        job_source: job.source,
-        job_location: job.location ?? null,
-        job_salary_range: job.salary ?? null,
-        job_posted_at: job.postedAt ?? null,
-        company_name: job.company,
-        company_url: job.companyUrl ?? null,
-        company_linkedin_url: job.companyLinkedinUrl ?? null,
-        company_description: job.companyDescription ?? null,
-        company_size: job.companySize ?? null,
-        company_location: null,
-        company_industry: null,
-        company_funding: null,
-        contact_name: job.recruiterName ?? null,
-        contact_title: null,
-        contact_email: null,
-        contact_linkedin_url: null,
-        status: "backlog",
-        score,
-        enrichment_data,
-        tags: [],
-        channel: LINKEDIN_JOB_POST_CHANNEL,
-      };
-    });
-
-    if (leadsToInsert.length === 0) {
-      await supabase
-        .from("scraping_jobs")
-        .update({
-          leads_found: jobs.length,
-          leads_imported: 0,
-          status: "completed",
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", scrapingJobId);
-      return new Response(
-        JSON.stringify({
-          scrapingJobId,
-          imported: 0,
-          skipped: jobs.length,
-          totalFromApify,
-          savedSearchId: resolvedSavedSearchId,
-          savedSearchName: resolvedSavedSearchName,
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const { data: inserted, error: insertLeadError } = await supabase
-      .from("leads")
-      .insert(leadsToInsert)
-      .select("id");
-
-    if (insertLeadError) {
-      const insertMsg =
-        insertLeadError?.message ??
-        (insertLeadError as { details?: string })?.details ??
-        String(insertLeadError);
-      await supabase
-        .from("scraping_jobs")
-        .update({
-          status: "failed",
-          error_message: insertMsg,
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", scrapingJobId);
-      throw new Error(insertMsg);
-    }
-
-    await supabase
-      .from("scraping_jobs")
-      .update({
-        leads_found: jobs.length,
-        leads_imported: inserted?.length ?? 0,
-        status: "completed",
-        completed_at: new Date().toISOString(),
-      })
-      .eq("id", scrapingJobId);
-
     return new Response(
       JSON.stringify({
         scrapingJobId,
-        imported: inserted?.length ?? 0,
-        skipped: jobs.length - (inserted?.length ?? 0),
-        totalFromApify,
+        imported: result.imported,
+        skipped: result.skipped,
+        totalFromApify: result.totalFromApify,
         savedSearchId: resolvedSavedSearchId,
         savedSearchName: resolvedSavedSearchName,
       }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -483,6 +483,8 @@ type LastSearchResult =
       totalFromApify: number;
       savedSearchId?: string | null;
       savedSearchName?: string | null;
+      asyncImport?: boolean;
+      asyncMessage?: string;
     }
   | { ok: false; error: string }
   | null;
@@ -892,16 +894,36 @@ export function SearchConfigPage({
           <div className="mt-8 space-y-4">
             {lastSearchResult.ok ? (
               <>
-                <div className="rounded-xl border p-4 flex items-center justify-between gap-4 bg-green-500/10 border-green-500/30 text-green-800 dark:bg-green-500/10 dark:border-green-500/30 dark:text-green-200">
-                  <p className="text-sm">
-                    <span className="font-medium">{lastSearchResult.imported} new</span> imported,{' '}
-                    {lastSearchResult.skipped} already in list. Total from Apify: {lastSearchResult.totalFromApify}.
-                  </p>
+                <div
+                  className={`rounded-xl border p-4 flex items-center justify-between gap-4 text-sm ${
+                    lastSearchResult.asyncImport
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:bg-amber-500/10 dark:border-amber-500/40 dark:text-amber-100'
+                      : 'bg-green-500/10 border-green-500/30 text-green-800 dark:bg-green-500/10 dark:border-green-500/30 dark:text-green-200'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium">
+                      {lastSearchResult.asyncImport ? 'Search started (background import)' : 'Search finished'}
+                    </p>
+                    <p className="mt-1">
+                      {lastSearchResult.asyncImport ? (
+                        <>
+                          {lastSearchResult.asyncMessage ??
+                            'Apify is still running. Results will load below when the import completes — use Refresh in the results header.'}
+                        </>
+                      ) : (
+                        <>
+                          <span className="font-medium">{lastSearchResult.imported} new</span> imported,{' '}
+                          {lastSearchResult.skipped} already in list. Total from Apify: {lastSearchResult.totalFromApify}.
+                        </>
+                      )}
+                    </p>
+                  </div>
                   {onDismissResult && (
                     <button
                       type="button"
                       onClick={onDismissResult}
-                      className="p-1.5 rounded-lg text-vloom-muted hover:bg-vloom-border/50 hover:text-vloom-text"
+                      className="p-1.5 rounded-lg text-vloom-muted hover:bg-vloom-border/50 hover:text-vloom-text shrink-0"
                       aria-label="Dismiss"
                     >
                       <X className="w-5 h-5" />
@@ -990,7 +1012,10 @@ export function SearchConfigPage({
                       Try again
                     </button>
                   )}
-                  {onDismissResult && /Sesión caducada|Sesión no reconocida|sign in again|logged in/i.test(lastSearchResult.error) && (
+                  {onDismissResult &&
+                    /Sesión caducada|Sesión no reconocida|rechazó la sesión|Tu sesión pertenece|JWT issuer|VITE_SUPABASE_URL|sign in again|logged in/i.test(
+                      lastSearchResult.error,
+                    ) && (
                     <RefreshSessionButton onSuccess={onDismissResult} />
                   )}
                 </div>

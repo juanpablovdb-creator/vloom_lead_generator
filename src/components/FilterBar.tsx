@@ -402,8 +402,8 @@ export function FilterBar({
         <ToggleFilter
           label="Leads only"
           icon={FolderOpen}
-          value={filters.marked_as_lead_only === true}
-          onChange={(value) => onFilterChange('marked_as_lead_only', value ? true : undefined)}
+          value={filters.marked_as_lead_only}
+          onChange={(value) => onFilterChange('marked_as_lead_only', value === true ? true : undefined)}
         />
 
         {/* Score filter */}

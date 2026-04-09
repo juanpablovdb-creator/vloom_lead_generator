@@ -52,6 +52,9 @@ type LastSearchResult =
       totalFromApify: number;
       savedSearchId?: string | null;
       savedSearchName?: string | null;
+      /** LinkedIn Jobs: import finishes via Apify webhook (long runs). */
+      asyncImport?: boolean;
+      asyncMessage?: string;
     }
   | { ok: false; error: string }
   | null;
@@ -105,6 +108,8 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
         totalFromApify: result.totalFromApify,
         savedSearchId: result.savedSearchId ?? null,
         savedSearchName: result.savedSearchName ?? null,
+        asyncImport: result.async === true,
+        asyncMessage: result.message,
       });
     } catch (err) {
       const msg =
@@ -163,6 +168,8 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
               totalFromApify: result.totalFromApify,
               savedSearchId: result.savedSearchId ?? null,
               savedSearchName: result.savedSearchName ?? null,
+              asyncImport: result.async === true,
+              asyncMessage: result.message,
             });
             setSection('discovery');
             setDiscoverySub('leads-lists');
@@ -281,17 +288,30 @@ function LeadsListView({
       {lastSearchResult && (
         <div
           className={`mb-4 rounded-lg border p-4 text-sm ${
-            lastSearchResult.ok
-              ? 'border-green-200 bg-green-50 dark:bg-green-500/10 text-green-800 dark:text-green-200'
-              : 'border-red-200 bg-red-50 dark:bg-red-500/10 text-red-800 dark:text-red-200'
+            !lastSearchResult.ok
+              ? 'border-red-200 bg-red-50 dark:bg-red-500/10 text-red-800 dark:text-red-200'
+              : lastSearchResult.asyncImport
+                ? 'border-amber-200 bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-100'
+                : 'border-green-200 bg-green-50 dark:bg-green-500/10 text-green-800 dark:text-green-200'
           }`}
         >
           {lastSearchResult.ok ? (
             <>
-              <p className="font-medium">Search finished.</p>
+              <p className="font-medium">
+                {lastSearchResult.asyncImport ? 'Search started (background import)' : 'Search finished.'}
+              </p>
               <p className="mt-1">
-                {lastSearchResult.imported} new jobs imported, {lastSearchResult.skipped} already in your list (not
-                re-enriched). Total from Apify: {lastSearchResult.totalFromApify}.
+                {lastSearchResult.asyncImport ? (
+                  <>
+                    {lastSearchResult.asyncMessage ??
+                      'Apify is still running. New jobs will appear in this list when the run completes. Use Refresh in the table below.'}
+                  </>
+                ) : (
+                  <>
+                    {lastSearchResult.imported} new jobs imported, {lastSearchResult.skipped} already in your list (not
+                    re-enriched). Total from Apify: {lastSearchResult.totalFromApify}.
+                  </>
+                )}
               </p>
             </>
           ) : (

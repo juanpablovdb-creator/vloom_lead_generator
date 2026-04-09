@@ -2,7 +2,8 @@
 // Receives: { leadIds: string[] }. Fetches leads and user's active personas; for each distinct company
 // runs the actor with company URL + persona filters; creates one lead row per person found (same company, new contact).
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
+import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const LINKEDIN_EMPLOYEES_ACTOR = "harvestapi/linkedin-company-employees";
@@ -101,23 +102,17 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      { global: { headers: { Authorization: authHeader } } }
-    );
-
-    const jwt = authHeader.replace("Bearer ", "").trim();
-    const { data: { user }, error: userError } = await supabase.auth.getUser(jwt);
-    if (userError || !user) {
-      const reason = userError?.message?.toLowerCase().includes("expired")
+    const resolved = await resolveUserAndClient(authHeader);
+    if (!resolved.ok) {
+      const reason = resolved.message.toLowerCase().includes("expired")
         ? "Session expired. Please sign in again."
-        : userError?.message ?? "You must be logged in.";
+        : resolved.message;
       return new Response(JSON.stringify({ error: reason }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const { user, supabase } = resolved;
 
     let body: RequestBody;
     try {
@@ -256,9 +251,9 @@ Deno.serve(async (req: Request) => {
       const runData = await runRes.json();
       const runId = runData?.data?.id;
       let datasetId = runData?.data?.defaultDatasetId;
-      let status = runData?.data?.status;
+      let status = normalizeApifyRunStatus(runData?.data?.status);
 
-      if (status === "RUNNING" && runId) {
+      if ((status === "RUNNING" || status === "READY") && runId) {
         for (let i = 0; i < 90; i++) {
           await new Promise((r) => setTimeout(r, 2000));
           const statusRes = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, {
@@ -266,12 +261,12 @@ Deno.serve(async (req: Request) => {
           });
           if (!statusRes.ok) break;
           const statusData = await statusRes.json();
-          status = statusData?.data?.status;
+          status = normalizeApifyRunStatus(statusData?.data?.status);
           if (status === "SUCCEEDED") {
             datasetId = statusData?.data?.defaultDatasetId ?? datasetId;
             break;
           }
-          if (status === "FAILED") break;
+          if (status === "FAILED" || status === "ABORTED" || status === "TIMED-OUT") break;
         }
       }
 

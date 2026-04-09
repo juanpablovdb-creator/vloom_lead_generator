@@ -8,6 +8,16 @@ Formato por entrada: **Problema** | **Solución propuesta** | **Deadline** (opci
 
 ## Entradas
 
+### Edge Functions síncronas vs duración de runs Apify
+
+**Problema:** Las funciones que esperan todo el actor en una sola invocación chocan con el wall clock de Edge (~150s gratis).
+
+**Estado:** **LinkedIn Jobs** (`run-job-search` + `apify-job-webhook` + secretos `APIFY_WEBHOOK_SECRET` y `SUPABASE_SERVICE_ROLE_KEY`) ya puede importar vía webhook. Sin esos secretos sigue el modo síncrono antiguo.
+
+**Pendiente:** Aplicar el mismo patrón a **Post Feeds** (`run-linkedin-post-feed`) y otros actores largos si hace falta.
+
+---
+
 ### API keys en libs (ai-email, sendgrid, apify) asumen Supabase
 
 **Problema:** Los clientes Apify, SendGrid y AI Email obtienen API keys desde la tabla `api_keys` de Supabase. Si Supabase no está configurado, esas llamadas fallarán sin mensaje claro.

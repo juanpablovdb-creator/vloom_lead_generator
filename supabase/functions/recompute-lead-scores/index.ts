@@ -1,8 +1,8 @@
 // Leadflow Vloom - Edge Function: recompute lead scores with Clay-style formula
 // POST { leadIds?: string[] }. If leadIds omitted or empty, recomputes for all user's leads.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computeLeadScore } from "../_shared/leadScore.ts";
+import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -33,20 +33,14 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      { global: { headers: { Authorization: authHeader } } }
-    );
-
-    const { data: { user }, error: userError } = await supabase.auth.getUser(authHeader.replace("Bearer ", "").trim());
-    if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: userError?.message ?? "You must be logged in." }),
-        { status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const resolved = await resolveUserAndClient(authHeader);
+    if (!resolved.ok) {
+      return new Response(JSON.stringify({ error: resolved.message }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
+    const { user, supabase } = resolved;
 
     let leadIds: string[] | undefined;
     try {

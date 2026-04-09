@@ -2,7 +2,8 @@
 // Receives: input? savedSearchId?. Uses JWT for Supabase RLS.
 // Returns: { scrapingJobId, imported, skipped, totalFromApify, savedSearchId?, savedSearchName? }.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
+import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
 import { computeLeadScore } from "../_shared/leadScore.ts";
 import { loadExistingLeadDedupeKeys } from "../_shared/loadExistingLeadDedupeKeys.ts";
 
@@ -363,23 +364,17 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      { global: { headers: { Authorization: authHeader } } },
-    );
-
-    const jwt = authHeader.replace("Bearer ", "").trim();
-    const { data: { user }, error: userError } = await supabase.auth.getUser(jwt);
-    if (userError || !user) {
-      const reason = userError?.message?.toLowerCase().includes("expired")
+    const resolved = await resolveUserAndClient(authHeader);
+    if (!resolved.ok) {
+      const reason = resolved.message.toLowerCase().includes("expired")
         ? "Session expired. Please sign in again."
-        : userError?.message ?? "You must be logged in to run a search.";
+        : resolved.message;
       return new Response(JSON.stringify({ error: reason }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const { user, supabase } = resolved;
 
     let body: RequestBody;
     try {
@@ -442,8 +437,10 @@ Deno.serve(async (req: Request) => {
     let resolvedSavedSearchId: string | null = savedSearchId ?? null;
     if (!resolvedSavedSearchId) {
       const now = new Date();
-      const dateStr = now.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-      const timeStr = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+      // Use a fixed UTC-5 timezone for naming (matches business timezone regardless of server region).
+      const timeZone = "America/Bogota";
+      const dateStr = now.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone });
+      const timeStr = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone });
       const first = params.searchQueries?.[0]?.trim() || "LinkedIn Posts";
       const autoName = `${first} – ${dateStr}, ${timeStr}`;
       const { data: savedRow, error: savedErr } = await supabase
@@ -553,10 +550,11 @@ Deno.serve(async (req: Request) => {
       const runData = await runRes.json();
       const runId = runData?.data?.id;
       const datasetId = runData?.data?.defaultDatasetId;
-      const status = runData?.data?.status;
+      const statusRaw = runData?.data?.status;
+      const status = normalizeApifyRunStatus(statusRaw);
 
       if (status !== "SUCCEEDED" && status !== "RUNNING" && status !== "READY") {
-        throw new Error(`Apify run status: ${status}`);
+        throw new Error(`Apify run status: ${(statusRaw ?? status) || "unknown"}`);
       }
 
       const apifyHeaders = { Authorization: `Bearer ${apiToken}` };
@@ -587,7 +585,7 @@ Deno.serve(async (req: Request) => {
             throw new Error(msg ?? "Failed to get run status");
           }
           const statusData = await statusRes.json();
-          const s = statusData?.data?.status;
+          const s = normalizeApifyRunStatus(statusData?.data?.status);
           if (s === "SUCCEEDED") {
             const dsId = statusData?.data?.defaultDatasetId;
             if (!dsId) throw new Error("No dataset ID from Apify run.");
@@ -602,7 +600,9 @@ Deno.serve(async (req: Request) => {
         if (!pollFinished) {
           const finalRes = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, { headers: apifyHeaders });
           const finalData = finalRes.ok ? await finalRes.json() : null;
-          const fs = finalData?.data?.status ?? "UNKNOWN";
+          const fs = finalData?.data?.status != null
+            ? String(finalData.data.status)
+            : "UNKNOWN";
           throw new Error(
             `Apify run did not finish in time (last status: ${fs}). Try again or check the run in Apify Console.`,
           );
@@ -654,10 +654,12 @@ Deno.serve(async (req: Request) => {
               throw new Error(msg ?? "Failed to get run status");
             }
             const statusData = await statusRes.json();
-            const s = statusData?.data?.status;
+            const s = normalizeApifyRunStatus(statusData?.data?.status);
             resolvedDatasetId = resolvedDatasetId ?? statusData?.data?.defaultDatasetId;
             if (s === "SUCCEEDED") break;
-            if (s === "FAILED") throw new Error("Profile scraping run failed.");
+            if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") {
+              throw new Error("Profile scraping run failed.");
+            }
           }
 
           if (!resolvedDatasetId) throw new Error("No dataset ID from profile scraping run.");
@@ -709,10 +711,11 @@ Deno.serve(async (req: Request) => {
           const runData = await runRes.json();
           const runId = runData?.data?.id;
           const datasetId = runData?.data?.defaultDatasetId;
-          const status = runData?.data?.status;
+          const statusRawProfile = runData?.data?.status;
+          const status = normalizeApifyRunStatus(statusRawProfile);
 
           if (status !== "SUCCEEDED" && status !== "RUNNING" && status !== "READY") {
-            throw new Error(`Apify profile run status: ${status}`);
+            throw new Error(`Apify profile run status: ${(statusRawProfile ?? status) || "unknown"}`);
           }
 
           let profileItems: Record<string, unknown>[] = [];

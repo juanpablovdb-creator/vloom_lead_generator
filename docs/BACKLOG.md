@@ -27,6 +27,8 @@ Items priorizados, sin fecha asignada.
 - [ ] Fuentes Google Maps, LinkedIn People (coming soon → activas)
 - [ ] Tests unitarios / E2E
 - [ ] CI/CD (lint, build en PR)
+- [x] Apify: importación asíncrona LinkedIn Jobs (webhook `apify-job-webhook` + secretos; ver `docs/APIFY_SETUP.md`)
+- [ ] Apify: mismo patrón asíncrono para Post Feeds / actores largos si aplica
 - [x] Deploy a producción (guía en docs/DEPLOY.md; build TS pasa; fix TS Supabase insert/update para Vercel)
 
 ---
@@ -51,7 +53,15 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Post Feeds: normalizar `postedAt` del actor para evitar `"[object Object]"` en `job_posted_at` (timestamp)
 - [x] CRM: default “Marked leads only” + validar update en Send to leads (Post Feeds / Saved searches visibles en Backlog)
 - [x] LinkedIn Job search: canal por defecto (backfill + Send to leads), filtro Remote/workplace hacia Apify, dedupe `job_external_id` + enrich personas más robusto
-- [x] Autorun saved searches (cliente + `autorun_last_run_at` + migración 021); Leads/CRM muestran imports sin marcar por defecto; dedupe paginado en Edge + `saveJobsAsLeads`; Apify READY + timeout explícito
+- [x] Saved searches: solo botón Run (sin autorun en UI); badge **New** junto al lead en resultados para import del último run (`savedSearchLatestImport` + `highlightScrapingJobId` en `LeadsTable`); migración `023_disable_autorun_all_saved_searches.sql`
+- [x] Apify: normalizar estados (`apifyStatus.ts`), poll con `READY` en enrich companies/personas y en cliente Apify (Indeed/Profile/Jobs fallback)
+- [x] LinkedIn Jobs: `workplaceType` mapeado a enum HarvestAPI (`remote` / `hybrid` / `office`) en `run-job-search` y `searchLinkedInJobs`
+- [x] Cliente: header `apikey` en todas las llamadas `fetch` a Edge Functions (`apify.ts`)
+- [x] Edge Functions: `auth.getUser()` sin JWT (header global) en lugar de `getUser(jwt)` para evitar 401 tras claves JWT asimétricas
+- [x] Job search / Post feed: llamar Edge con `supabase.functions.invoke` + reintento 401
+- [x] Edge: `resolveUserAndClient` + `SUPABASE_SERVICE_ROLE_KEY` para validar JWT cuando anon falla
+- [x] Invalid JWT: comprobar `iss` del JWT vs SUPABASE_URL (Edge) y vs VITE_SUPABASE_URL (cliente)
+- [x] LinkedIn Jobs: si hay API key Apify guardada en Settings (`api_keys`), New Search no llama a Edge (`runJobSearchViaEdge` → solo `runJobSearch` en navegador)
 
 ---
 
