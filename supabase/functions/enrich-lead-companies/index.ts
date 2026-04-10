@@ -5,6 +5,7 @@
 import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
 import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
 import { computeLeadScore } from "../_shared/leadScore.ts";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const LINKEDIN_COMPANY_ACTOR = "harvestapi/linkedin-company";
@@ -15,11 +16,13 @@ function toApifyActorId(actorId: string): string {
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-vloom-enrich-secret",
 };
 
 interface RequestBody {
   leadIds: string[];
+  /** Used only for non-JWT fallback (shared secret path). */
+  userId?: string;
 }
 
 interface LeadRow {
@@ -46,6 +49,15 @@ function normUrl(url: string): string {
   return s;
 }
 
+function createServiceRoleClient(): SupabaseClient | null {
+  const url = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!url || !serviceRole) return null;
+  return createClient(url, serviceRole, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -60,24 +72,9 @@ Deno.serve(async (req: Request) => {
 
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const resolved = await resolveUserAndClient(authHeader);
-    if (!resolved.ok) {
-      const reason = resolved.message.toLowerCase().includes("expired")
-        ? "Session expired. Please sign in again."
-        : resolved.message;
-      return new Response(JSON.stringify({ error: reason }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { supabase } = resolved;
+    const enrichSecret = Deno.env.get('VLOOM_ENRICH_SECRET') ?? '';
+    const providedSecret = req.headers.get('x-vloom-enrich-secret') ?? '';
+    const secretOk = enrichSecret.length > 0 && providedSecret === enrichSecret;
 
     let body: RequestBody;
     try {
@@ -97,10 +94,74 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const { data: leads, error: fetchError } = await supabase
+    // Auth strategy:
+    // 1) Valid user JWT → RLS client (resolveUserAndClient).
+    // 2) Invalid/expired JWT but valid VLOOM_ENRICH_SECRET + body.userId → service role (gateway may still send Bearer).
+    // 3) No JWT but secret + userId → service role.
+    let supabase: SupabaseClient | null = null;
+    let fallbackUserId: string | null = null;
+
+    const uidFromBody = typeof body.userId === 'string' ? body.userId.trim() : '';
+
+    const useServiceRoleForSecret = (): Response | null => {
+      if (!secretOk) return null;
+      const sr = createServiceRoleClient();
+      if (!sr) {
+        return new Response(JSON.stringify({ error: "Server is missing SUPABASE_SERVICE_ROLE_KEY for enrich fallback." }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!uidFromBody) {
+        return new Response(JSON.stringify({
+          error: "userId is required when using enrich secret (invalid session JWT or no Authorization).",
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      supabase = sr;
+      fallbackUserId = uidFromBody;
+      return null;
+    };
+
+    if (authHeader) {
+      const resolved = await resolveUserAndClient(authHeader);
+      if (resolved.ok) {
+        supabase = resolved.supabase;
+      } else {
+        const srErr = useServiceRoleForSecret();
+        if (srErr) return srErr;
+        if (!fallbackUserId) {
+          const reason = resolved.message.toLowerCase().includes("expired")
+            ? "Session expired. Please sign in again."
+            : resolved.message;
+          return new Response(JSON.stringify({ error: reason }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    } else {
+      const srErr = useServiceRoleForSecret();
+      if (srErr) return srErr;
+      if (!fallbackUserId) {
+        return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    const leadSelect =
+      "id, user_id, company_linkedin_url, company_name, job_location, job_description, notes, company_funding, last_enriched_at";
+    let leadQuery = supabase
       .from("leads")
-      .select("id, company_linkedin_url, company_name, job_location, job_description, notes, company_funding, last_enriched_at")
+      .select(leadSelect)
       .in("id", leadIds);
+    if (fallbackUserId) leadQuery = leadQuery.eq("user_id", fallbackUserId);
+
+    const { data: leads, error: fetchError } = await leadQuery;
 
     if (fetchError || !leads?.length) {
       return new Response(

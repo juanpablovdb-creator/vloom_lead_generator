@@ -4,6 +4,7 @@
 
 import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
 import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const LINKEDIN_EMPLOYEES_ACTOR = "harvestapi/linkedin-company-employees";
@@ -14,11 +15,13 @@ function toApifyActorId(actorId: string): string {
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-vloom-enrich-secret",
 };
 
 interface RequestBody {
   leadIds: string[];
+  /** Used only for non-JWT fallback (shared secret path). */
+  userId?: string;
 }
 
 function str(v: unknown): string {
@@ -31,6 +34,15 @@ function normUrl(url: string): string {
   let s = url.toLowerCase().replace(/\/$/, "");
   if (!s.startsWith("http")) s = `https://www.linkedin.com/company/${s}`;
   return s;
+}
+
+function createServiceRoleClient(): SupabaseClient | null {
+  const url = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!url || !serviceRole) return null;
+  return createClient(url, serviceRole, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
 /** Map persona profile_scraper_mode to actor input value. */
@@ -95,24 +107,9 @@ Deno.serve(async (req: Request) => {
 
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const resolved = await resolveUserAndClient(authHeader);
-    if (!resolved.ok) {
-      const reason = resolved.message.toLowerCase().includes("expired")
-        ? "Session expired. Please sign in again."
-        : resolved.message;
-      return new Response(JSON.stringify({ error: reason }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { user, supabase } = resolved;
+    const enrichSecret = Deno.env.get('VLOOM_ENRICH_SECRET') ?? '';
+    const providedSecret = req.headers.get('x-vloom-enrich-secret') ?? '';
+    const secretOk = enrichSecret.length > 0 && providedSecret === enrichSecret;
 
     let body: RequestBody;
     try {
@@ -132,6 +129,62 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // Auth: valid JWT → RLS client; invalid JWT + secret + userId → service role; no JWT + secret → service role.
+    let supabase: SupabaseClient | null = null;
+    let userId: string | null = null;
+    const uidFromBody = typeof body.userId === 'string' ? body.userId.trim() : '';
+
+    const useServiceRoleForSecret = (): Response | null => {
+      if (!secretOk) return null;
+      const sr = createServiceRoleClient();
+      if (!sr) {
+        return new Response(JSON.stringify({ error: "Server is missing SUPABASE_SERVICE_ROLE_KEY for enrich fallback." }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!uidFromBody) {
+        return new Response(JSON.stringify({
+          error: "userId is required when using enrich secret (invalid session JWT or no Authorization).",
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      supabase = sr;
+      userId = uidFromBody;
+      return null;
+    };
+
+    if (authHeader) {
+      const resolved = await resolveUserAndClient(authHeader);
+      if (resolved.ok) {
+        supabase = resolved.supabase;
+        userId = resolved.user?.id ?? null;
+      } else {
+        const srErr = useServiceRoleForSecret();
+        if (srErr) return srErr;
+        if (!userId) {
+          const reason = resolved.message.toLowerCase().includes("expired")
+            ? "Session expired. Please sign in again."
+            : resolved.message;
+          return new Response(JSON.stringify({ error: reason }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    } else {
+      const srErr = useServiceRoleForSecret();
+      if (srErr) return srErr;
+      if (!userId) {
+        return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const { data: leads, error: leadsErr } = await supabase
       .from("leads")
       .select("id, user_id, company_name, company_url, company_linkedin_url, company_size, company_industry, company_description, company_funding, company_location")
@@ -142,6 +195,16 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ error: leadsErr?.message ?? "No leads found or access denied." }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // When using service role fallback, ensure we're scoped to the provided userId.
+    const leadsArray = (leads ?? []) as LeadTemplate[];
+    const scopedLeads = userId ? leadsArray.filter((l) => l.user_id === userId) : leadsArray;
+    if (!scopedLeads.length) {
+      return new Response(JSON.stringify({ error: "No leads found or access denied." }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const { data: personas, error: personasErr } = await supabase
@@ -167,7 +230,7 @@ Deno.serve(async (req: Request) => {
 
     // Group leads by company (by company_linkedin_url or company_name); keep one template per company
     const companyKeyToTemplate = new Map<string, LeadTemplate>();
-    for (const lead of leads as LeadTemplate[]) {
+    for (const lead of scopedLeads as LeadTemplate[]) {
       const url = str(lead.company_linkedin_url);
       const name = str(lead.company_name);
       const key = url ? normUrl(url) : (name ? name.toLowerCase() : "");

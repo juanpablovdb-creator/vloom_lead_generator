@@ -32,6 +32,25 @@ export function useAuth() {
       console.log("[useAuth] mount", { hasOAuthParams, initialUrl: window.location.href });
     }
 
+    /** Avoid an indefinite "Loading…" / blank UI if OAuth or getSession stalls. */
+    const loadingCapMs = 45_000;
+    const capTimer = window.setTimeout(() => {
+      if (!didSetLoadingFromEvent) {
+        if (import.meta.env.DEV) {
+          console.warn("[useAuth] loading cap reached; leaving loading state (check session / OAuth callback).");
+        }
+        didSetLoadingFromEvent = true;
+        setLoading(false);
+        try {
+          if (hasOAuthParams && window.location.search) {
+            window.history.replaceState({}, "", window.location.pathname + window.location.hash);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }, loadingCapMs);
+
     const getInitial = async () => {
       const { data: { session } } = await db.auth.getSession();
       setUser(session?.user ?? null);
@@ -65,7 +84,10 @@ export function useAuth() {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      window.clearTimeout(capTimer);
+      subscription.unsubscribe();
+    };
   }, [hasOAuthParams]);
 
   const signOut = async () => {

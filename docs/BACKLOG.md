@@ -62,6 +62,11 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Edge: `resolveUserAndClient` + `SUPABASE_SERVICE_ROLE_KEY` para validar JWT cuando anon falla
 - [x] Invalid JWT: comprobar `iss` del JWT vs SUPABASE_URL (Edge) y vs VITE_SUPABASE_URL (cliente)
 - [x] LinkedIn Jobs: si hay API key Apify guardada en Settings (`api_keys`), New Search no llama a Edge (`runJobSearchViaEdge` → solo `runJobSearch` en navegador)
+- [x] LinkedIn Post Feeds: bypass/fallback navegador + deploy `run-linkedin-post-feed --no-verify-jwt` (paridad con Jobs; ver `apify.ts` / `APIFY_SETUP.md`)
+- [x] Saved searches: Send to leads no revierte el flujo si falla solo el enriquecimiento Edge (JWT/gateway); UX muestra éxito + aviso
+- [x] Enrich: fallback secret + anon Bearer tras Invalid JWT (fix throw tras enrich OK; Edge acepta JWT inválido + secret + userId)
+- [x] Dev: pantalla gris — tope de loading en OAuth/auth + vista Saved search eliminada + guardas en `main.tsx`
+- [x] Saved searches: banner Send to leads minimal (sin JWT / deploy / Refresh session)
 
 ---
 

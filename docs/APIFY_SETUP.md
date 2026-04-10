@@ -38,15 +38,15 @@ The Edge Function reads it with `Deno.env.get('APIFY_API_TOKEN')` and never expo
 
 **If New Search fails with “Invalid JWT”:**
 
-> Scope: this appears when you run **LinkedIn Jobs** (Discovery → New Search → start search). That path is the only one that calls the Edge Function **`run-job-search`** (`runJobSearchViaEdge` in the app). Post Feeds and other sources use different functions.
+> Scope: **LinkedIn Jobs** calls Edge **`run-job-search`**; **LinkedIn Post Feeds** calls **`run-linkedin-post-feed`**. The app can run Post Feeds (and Jobs) in the **browser** if an Apify token exists (`api_keys` or `VITE_APIFY_API_TOKEN`), avoiding the Edge gateway JWT. Otherwise fix JWT with deploy **`--no-verify-jwt`** (see §“Invalid JWT” below).
 
 1. Ensure Edge secret **`SUPABASE_SERVICE_ROLE_KEY`** exists (Project Settings → API → `service_role`). Same as for §3b / `apify-job-webhook`.
 2. **`SUPABASE_URL` and `SUPABASE_ANON_KEY` in Edge → Secrets are reserved** (managed by Supabase for your project). You **cannot delete** them; they always match this project. If you still see “Invalid JWT”, the usual causes are: **stale session** (sign out, clear site data for your app domain, sign in again), or the **frontend** using another project’s URL/anon key.
 3. **Frontend:** `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in Vercel / `.env` must match **Project Settings → API** for this same project. After changing env vars, **redeploy** the frontend (Vite bakes them in at build time).
 4. **Logs — where to see the root cause**
 
-   - **Supabase Dashboard:** **Edge Functions** → **`run-job-search`** → **Logs** (wording may vary: *Invocations*, *Observability*). This project logs `[run-job-search] request` at the start of each invocation. On auth failure, `_shared/resolveUserAndClient.ts` emits **`[resolveUserAndClient] getClaims:`** or **`GET /auth/v1/user:`** or **`admin auth.getUser(jwt):`** — those lines are more specific than the generic “Invalid JWT” shown in the UI.
-   - **Interpretation:** If your attempt **never** produces **`[run-job-search] request`**, the gateway may be rejecting the JWT **before** Deno runs (or the function name/region is wrong). This repo sets **`verify_jwt = false`** in `supabase/functions/run-job-search/config.toml` so validation happens inside the function; if production was deployed without that file, redeploy: `npx supabase functions deploy run-job-search`.
+   - **Supabase Dashboard:** **Edge Functions** → **`run-job-search`** or **`run-linkedin-post-feed`** → **Logs**. Expect `[run-job-search] request` / `[run-linkedin-post-feed] request` at the start of each invocation. On auth failure inside the function, **`[resolveUserAndClient] …`** warnings are more specific than “Invalid JWT” in the UI.
+   - **Interpretation:** If POST **never** produces that request log line, the gateway may be rejecting the JWT before Deno runs. Redeploy with **`--no-verify-jwt`** (see the code block in “Invalid JWT” below), e.g. `npx supabase functions deploy run-linkedin-post-feed --no-verify-jwt`.
    - **Browser:** DevTools → **Network** → the `run-job-search` request → **Response** (and **Headers** for status). The JSON body is the same error the frontend surfaces.
    - **CLI (optional):** `npx supabase functions logs run-job-search --project-ref <your-project-ref>` (CLI must be logged in to the project).
 
@@ -142,6 +142,33 @@ The Supabase gateway may reject your JWT (e.g. with newer JWT signing). Deploy t
 supabase functions deploy run-job-search --no-verify-jwt
 ```
 
+For **LinkedIn Post Feeds** (function `run-linkedin-post-feed`), use the same pattern when the UI shows Invalid JWT for that flow:
+
+```bash
+npx supabase functions deploy run-linkedin-post-feed --no-verify-jwt
+```
+
 If you prefer, you can still try a normal deploy first, but **when you see POST 401 with `execution_id: null` in Invocations**, this `--no-verify-jwt` deploy is the first fix to try.
 
 Then run the search again (sign in again if needed).
+
+### "Invalid JWT" on **Send to leads** / enrich (`enrich-lead-companies` / `enrich-lead-personas`)
+
+The app retries with a **shared secret** so enrichment can run even when the **user JWT is rejected at the gateway** (as long as the function still executes).
+
+1. **Supabase Dashboard** → **Edge Functions** → **Secrets**:
+   - `VLOOM_ENRICH_SECRET` = a long random string (same value you put in the frontend).
+   - `SUPABASE_SERVICE_ROLE_KEY` = your project’s service role key (Settings → API).
+   - Keep `APIFY_API_TOKEN` set as usual.
+2. **Frontend** (`.env` / Vercel env): `VITE_VLOOM_ENRICH_SECRET` = the **same** string as `VLOOM_ENRICH_SECRET`, then redeploy the site.
+3. Redeploy the functions so the new auth logic is live:
+
+```bash
+npx supabase functions deploy enrich-lead-companies enrich-lead-personas
+```
+
+Calls use `Authorization: Bearer <anon key>` plus `x-vloom-enrich-secret` and `userId` in the JSON body; the function then uses the service role only when the session JWT fails, scoped to that user’s leads.
+
+**Without** `VITE_VLOOM_ENRICH_SECRET` / `VLOOM_ENRICH_SECRET`, enrichment still relies on a valid JWT at the gateway or on the **browser Apify** fallback (user Apify key in Settings / `VITE_APIFY_API_TOKEN`).
+
+**Invocations: OPTIONS 200, then POST 401:** el **gateway** está rechazando el POST (JWT) antes de que corra tu función. Arreglo típico: `npx supabase functions deploy enrich-lead-companies enrich-lead-personas --no-verify-jwt`. Con clave Apify en Settings (o `VITE_APIFY_API_TOKEN`), **Send to leads** intenta primero el enrich de compañía **en el navegador** para evitar ese POST a Edge.
