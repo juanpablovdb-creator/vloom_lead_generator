@@ -6,6 +6,7 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
+- **Fix `enrich-lead-personas`:** Tras el refactor de auth, la query de `personas` usaba `user.id` (inexistente); ahora usa `userId` + guard si falta.
 - **Enrich company — prioridad navegador:** Si hay clave Apify (`api_keys` / `VITE_APIFY_API_TOKEN`), `sendSelectedToLeadsAndEnrich` ejecuta primero `enrichLeadCompaniesInBrowser` y solo si no enriqueció nada llama a Edge (evita POST 401 del gateway en Invocations). Doc: `APIFY_SETUP.md` (OPTIONS 200 + POST 401).
 - **Saved searches — banner Send to leads:** Si el enrich falla, la UI solo muestra envío a Leads + “LinkedIn enrichment could not run” (sin detalle JWT ni comandos deploy ni “Refresh session”). Estilo warning (ámbar); éxito completo sigue en verde.
 - **Pantalla gris / UI colgada (auth + Saved searches):** `useAuth` aplica un tope de 45s al estado `loading` y, si la URL traía `code`/`state` de OAuth y sigue bloqueado, hace `replaceState` sin query para poder recuperar la sesión de login. `SavedSearchesView` ya no devuelve `null` si el `viewingSearchId` apunta a una búsqueda borrada (mensaje + “Back to list”). `main.tsx` valida que exista `#root` antes de `createRoot`.

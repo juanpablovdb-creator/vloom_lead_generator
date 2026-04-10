@@ -207,10 +207,17 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    if (!userId) {
+      return new Response(JSON.stringify({ error: "Could not determine user id for personas." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: personas, error: personasErr } = await supabase
       .from("personas")
       .select("id, persona_function, seniority, job_title_keywords, locations, max_items, profile_scraper_mode")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("is_active", true);
 
     if (personasErr) {
