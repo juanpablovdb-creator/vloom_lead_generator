@@ -4,14 +4,14 @@
 
 @layer base {
   :root {
-    /* CRM export theme tokens (Lovable Kanban look) */
-    --background: 228 14% 10%;
+    /* Dark theme: base ~#1a1b21; card/surfaces un paso más claros */
+    --background: 228 12% 12%;
     --foreground: 220 13% 91%;
 
-    --card: 228 12% 14%;
+    --card: 228 11% 15%;
     --card-foreground: 220 13% 91%;
 
-    --popover: 228 12% 14%;
+    --popover: 228 11% 15%;
     --popover-foreground: 220 13% 91%;
 
     --primary: 250 60% 55%;
@@ -29,8 +29,8 @@
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 228 10% 22%;
-    --input: 228 10% 22%;
+    --border: 228 10% 24%;
+    --input: 228 10% 24%;
     --ring: 250 60% 55%;
 
     --radius: 0.5rem;
@@ -70,6 +70,24 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground));
+}
+
+/* CrmDateInput fieldTone=dark: dark value area + readable mm/dd/yyyy (Chromium) */
+.crm-date-field-dark::-webkit-datetime-edit,
+.crm-date-field-dark::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+.crm-date-field-dark::-webkit-datetime-edit-month-field,
+.crm-date-field-dark::-webkit-datetime-edit-day-field,
+.crm-date-field-dark::-webkit-datetime-edit-year-field {
+  color: #fafafa;
+  font-weight: 600;
+}
+
+.crm-date-field-dark::-webkit-datetime-edit-text {
+  color: #71717a;
+  padding: 0 0.12em;
 }
 
 /* Focus styles */

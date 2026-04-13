@@ -5,6 +5,7 @@
 // =====================================================
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { X, ChevronDown, ChevronUp, CheckCircle2, Circle, UserMinus } from 'lucide-react';
+import { CrmDateInput } from './CrmDateInput';
 import { supabase } from '@/lib/supabase';
 import { dateOnlyToISO, isoToDateInputValue } from '@/lib/dateUtils';
 import type { Lead, LeadStatus } from '@/types/database';
@@ -437,18 +438,20 @@ export function LeadCardPopup({
 
             <div>
               <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">First contact date</div>
-              <input
-                type="date"
-                value={isoToDateInputValue(localLead.first_contacted_at ?? null)}
-                onChange={(e) => {
-                  const v = e.target.value ? dateOnlyToISO(e.target.value) : null;
+              <CrmDateInput
+                fieldTone="dark"
+                wrapperClassName="w-full max-w-xs"
+                inputClassName="text-sm py-2"
+                value={isoToDateInputValue(localLead.first_contacted_at ?? null) || undefined}
+                onChange={(raw) => {
+                  const v = raw ? dateOnlyToISO(raw) : null;
                   setLocalLead({ ...localLead, first_contacted_at: v });
                 }}
                 onBlur={async () => {
                   const v = localLead.first_contacted_at;
                   await onUpdateLead(localLead.id, { first_contacted_at: v ?? null });
                 }}
-                className="w-full max-w-xs rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+                title="First contact date"
               />
               <p className="mt-1 text-xs text-vloom-muted">Used for KPI cohort. Clear to use history/updated date.</p>
             </div>

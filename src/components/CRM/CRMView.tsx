@@ -15,6 +15,7 @@ import { CRMKanban } from './CRMKanban';
 import { LeadsTable } from '@/components/LeadsTable';
 import { FilterBar } from '@/components/FilterBar';
 import { LeadCardPopup } from './LeadCardPopup';
+import { CrmDateInput } from './CrmDateInput';
 
 const CHANNEL_OPTIONS = LEAD_CHANNEL_OPTIONS;
 
@@ -79,16 +80,19 @@ interface CRMPreferences {
 function getCRMPreferences(): CRMPreferences {
   try {
     const raw = localStorage.getItem(CRM_PREFS_KEY);
-    if (!raw) return { viewMode: 'table', view_by: 'person' };
+    if (!raw) return { viewMode: 'table', view_by: 'both' };
     const parsed = JSON.parse(raw) as Partial<CRMPreferences>;
+    const vb = parsed.view_by;
+    const view_by: LeadViewBy =
+      vb === 'company' ? 'company' : vb === 'person' ? 'person' : vb === 'both' ? 'both' : 'both';
     return {
       viewMode: parsed.viewMode === 'kanban' ? 'kanban' : 'table',
       // Only persist the ON state; avoid storing `false` so CRM opens with no filter selected.
       marked_as_lead_only: parsed.marked_as_lead_only === true ? true : undefined,
-      view_by: parsed.view_by === 'company' ? 'company' : 'person',
+      view_by,
     };
   } catch {
-    return { viewMode: 'table', view_by: 'person' };
+    return { viewMode: 'table', view_by: 'both' };
   }
 }
 
@@ -274,6 +278,7 @@ function AddLeadModal({ onClose, onCreate, onCreated }: AddLeadModalProps) {
 
 export function CRMView() {
   const [initialPrefs] = useState(() => getCRMPreferences());
+  const [viewMode, setViewMode] = useState<CRMViewMode>(() => initialPrefs.viewMode);
 
   const {
     leads,
@@ -287,6 +292,8 @@ export function CRMView() {
     filters,
     sort,
     setSort,
+    pagination,
+    setPageSize,
     selectedIds,
     toggleSelection,
     selectAll,
@@ -295,14 +302,13 @@ export function CRMView() {
     refreshLeads,
   } = useLeads({
     pageSize: 500,
+    fetchFullFilteredSet: viewMode === 'kanban',
     initialFilters: {
       marked_as_lead_only: initialPrefs.marked_as_lead_only,
       view_by: initialPrefs.view_by,
     },
     initialSort: { column: 'updated_at', direction: 'desc' },
   });
-
-  const [viewMode, setViewMode] = useState<CRMViewMode>(() => initialPrefs.viewMode);
   const [recomputingScores, setRecomputingScores] = useState(false);
   const [personaEnriching, setPersonaEnriching] = useState(false);
   const [personaEnrichError, setPersonaEnrichError] = useState<string | null>(null);
@@ -332,6 +338,11 @@ export function CRMView() {
   }
 
   const [csvBatchFirstContactDate, setCsvBatchFirstContactDate] = useState<string>(() => lastFridayDateOnly());
+
+  // Grid view uses paged fetch; Kanban uses fetchFullFilteredSet in useLeads (chunked) instead.
+  useEffect(() => {
+    if (viewMode !== 'kanban' && pagination.pageSize !== 500) setPageSize(500);
+  }, [viewMode, pagination.pageSize, setPageSize]);
 
   const handleImportCsv = useCallback(async (file: File) => {
     setCsvImportError(null);
@@ -428,6 +439,7 @@ export function CRMView() {
           contact_linkedin_url: null,
           contact_phone: null,
           status,
+          score: score ?? 0,
           score_weights: {
             has_email: 25,
             has_linkedin: 15,
@@ -466,6 +478,7 @@ export function CRMView() {
             company_name: baseRow.company_name,
             company_linkedin_url: baseRow.company_linkedin_url,
             status: baseRow.status,
+            score: baseRow.score,
             notes: baseRow.notes,
             enrichment_data: baseRow.enrichment_data,
             is_marked_as_lead: true,
@@ -649,8 +662,11 @@ export function CRMView() {
     if (filters.search) count++;
     if (filters.tags?.length) count++;
     if (filters.saved_search_id) count++;
-    if (filters.view_by) count++;
+    if (filters.view_by && filters.view_by !== 'both') count++;
     if (filters.channel?.length) count++;
+    if (filters.assignee?.length) count++;
+    if (filters.first_contacted_from || filters.first_contacted_to) count++;
+    if (filters.marked_as_lead_only !== undefined) count++;
     return count;
   }, [filters]);
 
@@ -669,11 +685,11 @@ export function CRMView() {
     setCRMPreferences({
       viewMode,
       marked_as_lead_only: filters.marked_as_lead_only,
-      view_by: filters.view_by,
+      view_by: filters.view_by ?? 'both',
     });
   }, [viewMode, filters.marked_as_lead_only, filters.view_by]);
   const { displayLeads, groupSizeByLeadId } = useMemo(
-    () => getDisplayLeadsForView(leads, filters.view_by),
+    () => getDisplayLeadsForView(leads, filters.view_by ?? 'both'),
     [leads, filters.view_by]
   );
 
@@ -791,6 +807,7 @@ export function CRMView() {
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 p-4 border-b border-border bg-card/50 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-3 min-w-0 flex-1">
         <div className="flex items-center bg-secondary rounded-md p-0.5">
           <button
             type="button"
@@ -811,38 +828,6 @@ export function CRMView() {
             <LayoutGrid className="w-4 h-4" /> Grid
           </button>
         </div>
-
-        <label className="flex items-center gap-2 text-xs text-foreground">
-          <span className="text-muted-foreground">First contact:</span>
-          <input
-            type="date"
-            value={filters.first_contacted_from ?? ''}
-            onChange={(e) => updateFilter('first_contacted_from', e.target.value || undefined)}
-            className="px-2 py-1.5 rounded-lg border border-border bg-secondary text-foreground text-xs"
-            title="First contact from"
-          />
-          <span className="text-muted-foreground">to</span>
-          <input
-            type="date"
-            value={filters.first_contacted_to ?? ''}
-            onChange={(e) => updateFilter('first_contacted_to', e.target.value || undefined)}
-            className="px-2 py-1.5 rounded-lg border border-border bg-secondary text-foreground text-xs"
-            title="First contact to"
-          />
-          {(filters.first_contacted_from || filters.first_contacted_to) && (
-            <button
-              type="button"
-              onClick={() => {
-                updateFilter('first_contacted_from', undefined);
-                updateFilter('first_contacted_to', undefined);
-              }}
-              className="text-muted-foreground hover:text-foreground"
-              title="Clear first contact filter"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </label>
 
         <label className="flex items-center gap-2 text-xs text-foreground">
           <span className="text-muted-foreground">Sort:</span>
@@ -900,7 +885,43 @@ export function CRMView() {
           Add lead
         </button>
 
-        <span className="text-xs text-muted-foreground">{displayLeads.length} leads</span>
+        <span className="text-xs text-muted-foreground">
+          {viewMode === 'kanban' ? leads.length : displayLeads.length}{' '}
+          {viewMode === 'kanban' ? 'cards' : 'leads'}
+        </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-transparent px-3 py-2 shrink-0 ml-auto">
+          <span className="text-xs font-medium text-foreground whitespace-nowrap">First contact</span>
+          <CrmDateInput
+            fieldTone="dark"
+            value={filters.first_contacted_from}
+            onChange={(v) => updateFilter('first_contacted_from', v)}
+            title="First contact from"
+            inputClassName="text-xs py-1.5"
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <CrmDateInput
+            fieldTone="dark"
+            value={filters.first_contacted_to}
+            onChange={(v) => updateFilter('first_contacted_to', v)}
+            title="First contact to"
+            inputClassName="text-xs py-1.5"
+          />
+          {(filters.first_contacted_from || filters.first_contacted_to) && (
+            <button
+              type="button"
+              onClick={() => {
+                updateFilter('first_contacted_from', undefined);
+                updateFilter('first_contacted_to', undefined);
+              }}
+              className="p-1.5 rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+              title="Clear first contact filter"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -1000,9 +1021,11 @@ export function CRMView() {
               updateFilter('tags', undefined);
               updateFilter('saved_search_id', undefined);
               updateFilter('channel', undefined);
+              updateFilter('assignee', undefined);
               updateFilter('first_contacted_from', undefined);
               updateFilter('first_contacted_to', undefined);
               updateFilter('marked_as_lead_only', undefined);
+              updateFilter('view_by', 'both');
             }}
             activeFilterCount={activeFilterCount}
           />
@@ -1020,7 +1043,8 @@ export function CRMView() {
       )}
       {viewMode === 'kanban' ? (
         <CRMKanban
-          leads={displayLeads}
+          // Always one card per lead: "By companies" only collapses rows in the table, not pipeline stages.
+          leads={leads}
           isLoading={isLoading}
           onStatusChange={updateLeadStatus}
           onUpdateLead={(id, updates) => updateLead(id, updates)}

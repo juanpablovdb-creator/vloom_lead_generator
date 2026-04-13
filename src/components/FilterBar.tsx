@@ -15,9 +15,10 @@ import {
   FolderOpen,
   Users,
   Building,
+  Layers,
   Megaphone,
 } from 'lucide-react';
-import type { LeadFilters, LeadStatus, LeadViewBy } from '@/types/database';
+import type { LeadFilters, LeadStatus } from '@/types/database';
 import { useSavedSearches } from '@/hooks/useSavedSearches';
 import { LEAD_CHANNEL_OPTIONS } from '@/lib/leadChannels';
 
@@ -188,6 +189,12 @@ export function FilterBar({
   const [showViewByDropdown, setShowViewByDropdown] = useState(false);
   const [showScoreFilter, setShowScoreFilter] = useState(false);
 
+  const viewBy = filters.view_by ?? 'both';
+  const viewByNarrowed = viewBy === 'person' || viewBy === 'company';
+  const viewByLabel =
+    viewBy === 'company' ? 'By companies' : viewBy === 'person' ? 'By people' : 'By both';
+  const ViewByMainIcon = viewBy === 'company' ? Building : viewBy === 'person' ? Users : Layers;
+
   return (
     <div className="bg-card rounded-xl border border-border p-4">
       <div className="flex items-center justify-between mb-4">
@@ -240,49 +247,65 @@ export function FilterBar({
           onChange={(values) => onFilterChange('status', values.length > 0 ? values as LeadStatus[] : undefined)}
         />
 
-        {/* Ver por: compañías o personas */}
+        {/* Ver por: ambos (default), solo personas o solo compañías */}
         <div className="relative">
           <button
+            type="button"
             onClick={() => setShowViewByDropdown(!showViewByDropdown)}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
-              filters.view_by
+              viewByNarrowed
                 ? 'border-primary/40 bg-primary/10 text-primary'
                 : 'border-border bg-card text-foreground hover:bg-secondary/30'
             }`}
           >
-            {filters.view_by === 'company' ? (
-              <Building className="w-4 h-4" />
-            ) : (
-              <Users className="w-4 h-4" />
-            )}
-            <span className="text-sm font-medium">
-              {filters.view_by === 'company' ? 'By companies' : 'By people'}
-            </span>
+            <ViewByMainIcon className="w-4 h-4" />
+            <span className="text-sm font-medium">{viewByLabel}</span>
             <ChevronDown className="w-4 h-4 ml-1" />
           </button>
           {showViewByDropdown && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowViewByDropdown(false)} />
-              <div className="absolute left-0 mt-2 w-44 bg-card rounded-lg shadow-lg border border-border py-2 z-20">
+              <div className="absolute left-0 mt-2 w-48 bg-card rounded-lg shadow-lg border border-border py-2 z-20">
                 <button
+                  type="button"
                   onClick={() => {
-                    onFilterChange('view_by', 'person' as LeadViewBy);
+                    onFilterChange('view_by', 'both');
                     setShowViewByDropdown(false);
                   }}
                   className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
-                    filters.view_by !== 'company' ? 'text-primary font-medium bg-primary/10' : 'text-foreground hover:bg-secondary/30'
+                    viewBy === 'both'
+                      ? 'text-primary font-medium bg-primary/10'
+                      : 'text-foreground hover:bg-secondary/30'
+                  }`}
+                >
+                  <Layers className="w-4 h-4" />
+                  By both
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onFilterChange('view_by', 'person');
+                    setShowViewByDropdown(false);
+                  }}
+                  className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
+                    viewBy === 'person'
+                      ? 'text-primary font-medium bg-primary/10'
+                      : 'text-foreground hover:bg-secondary/30'
                   }`}
                 >
                   <Users className="w-4 h-4" />
                   By people
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
-                    onFilterChange('view_by', 'company' as LeadViewBy);
+                    onFilterChange('view_by', 'company');
                     setShowViewByDropdown(false);
                   }}
                   className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
-                    filters.view_by === 'company' ? 'text-primary font-medium bg-primary/10' : 'text-foreground hover:bg-secondary/30'
+                    viewBy === 'company'
+                      ? 'text-primary font-medium bg-primary/10'
+                      : 'text-foreground hover:bg-secondary/30'
                   }`}
                 >
                   <Building className="w-4 h-4" />

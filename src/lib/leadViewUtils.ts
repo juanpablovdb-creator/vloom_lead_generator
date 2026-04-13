@@ -7,6 +7,7 @@ import type { LeadViewBy } from '@/types/database';
 /**
  * Returns leads to display and an optional map of lead id -> group size
  * (when view_by is 'company', one row per company; groupSizeByLeadId gives count per company).
+ * 'person' and 'both' keep one row per lead (no collapse).
  */
 export function getDisplayLeadsForView(
   leads: Lead[],

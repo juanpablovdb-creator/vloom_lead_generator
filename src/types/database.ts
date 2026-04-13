@@ -306,8 +306,8 @@ export interface EnrichmentResult {
 // UI State Types
 // =====================================================
 
-/** View mode for Leads list and CRM: by company (group by company) or by person (one row per contact). */
-export type LeadViewBy = 'company' | 'person';
+/** View mode for Leads list and CRM: by company (one row per company), by person (one row per contact), or both (full list, default). */
+export type LeadViewBy = 'company' | 'person' | 'both';
 
 export interface LeadFilters {
   status?: LeadStatus[];
@@ -399,7 +399,7 @@ export interface Database {
       };
       leads: {
         Row: Lead;
-        Insert: Omit<Lead, 'id' | 'created_at' | 'updated_at' | 'score'>;
+        Insert: Omit<Lead, 'id' | 'created_at' | 'updated_at'>;
         Update: Partial<Omit<Lead, 'id' | 'user_id'>>;
       };
       scoring_presets: {

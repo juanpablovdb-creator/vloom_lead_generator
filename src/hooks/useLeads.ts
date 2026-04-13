@@ -33,7 +33,15 @@ interface UseLeadsOptions {
   initialFilters?: LeadFilters;
   initialSort?: LeadSort;
   pageSize?: number;
+  /**
+   * When true, fetches every row matching current filters in chunks (PostgREST often caps ~1000 rows per response).
+   * Use for CRM Kanban so pipeline columns are complete.
+   */
+  fetchFullFilteredSet?: boolean;
 }
+
+const FULL_FETCH_BATCH = 1000;
+const FULL_FETCH_CAP = 50_000;
 
 interface UseLeadsReturn {
   // Data
@@ -90,6 +98,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     initialFilters = DEFAULT_FILTERS,
     initialSort = DEFAULT_SORT,
     pageSize: initialPageSize = 25,
+    fetchFullFilteredSet = false,
   } = options;
 
   // State
@@ -116,15 +125,12 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     });
   }, [initialFilters?.scraping_job_id, initialFilters?.saved_search_id]);
 
-  // Build query based on filters (only when Supabase is configured)
-  const buildQuery = useCallback(() => {
+  // Ordered query without range (saved_search `.in` is applied in fetchLeads).
+  const buildLeadsOrderedQuery = useCallback(() => {
     if (!supabase) return null;
     let query = supabase
       .from('leads')
       .select('*', { count: 'exact' });
-
-    // Saved search filter: only leads from runs of this saved search (via scraping_job_id)
-    // saved_search_id filter is applied in fetchLeads (via scraping_job ids)
 
     // Status filter
     if (filters.status && filters.status.length > 0) {
@@ -176,12 +182,19 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       query = query.lte('created_at', filters.date_to);
     }
 
-    // First contact date range filter (manual first_contacted_at)
-    if (filters.first_contacted_from) {
-      query = query.gte('first_contacted_at', filters.first_contacted_from);
-    }
-    if (filters.first_contacted_to) {
-      query = query.lte('first_contacted_at', filters.first_contacted_to);
+    // First contact date range filter (manual first_contacted_at).
+    // Include rows with NULL first_contacted_at so imports / manual leads are not dropped when a range is set
+    // (SQL comparisons with NULL are unknown, so plain gte/lte would exclude them).
+    if (filters.first_contacted_from && filters.first_contacted_to) {
+      const from = filters.first_contacted_from;
+      const to = filters.first_contacted_to;
+      query = query.or(
+        `first_contacted_at.is.null,and(first_contacted_at.gte.${from},first_contacted_at.lte.${to})`
+      );
+    } else if (filters.first_contacted_from) {
+      query = query.or(`first_contacted_at.is.null,first_contacted_at.gte.${filters.first_contacted_from}`);
+    } else if (filters.first_contacted_to) {
+      query = query.or(`first_contacted_at.is.null,first_contacted_at.lte.${filters.first_contacted_to}`);
     }
 
     // Search filter (busca en múltiples campos)
@@ -233,13 +246,8 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     // Sorting
     query = query.order(sort.column, { ascending: sort.direction === 'asc' });
 
-    // Pagination
-    const from = (pagination.page - 1) * pagination.pageSize;
-    const to = from + pagination.pageSize - 1;
-    query = query.range(from, to);
-
     return query;
-  }, [filters, sort, pagination.page, pagination.pageSize]);
+  }, [filters, sort]);
 
   // Fetch leads
   const fetchLeads = useCallback(async () => {
@@ -256,20 +264,13 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     }
 
     try {
-      let query = buildQuery();
-      if (!query) {
-        setLeads([]);
-        setTotalCount(0);
-        setIsLoading(false);
-        return;
-      }
-      // When filtering by saved search: get scraping_job ids for that saved search, then filter leads by them
+      let jobIds: string[] | null = null;
       if (filters.saved_search_id) {
         const { data: jobRows } = await supabase
           .from('scraping_jobs')
           .select('id')
           .eq('saved_search_id', filters.saved_search_id);
-        const jobIds = ((jobRows ?? []) as { id: string }[]).map((r) => r.id);
+        jobIds = ((jobRows ?? []) as { id: string }[]).map((r) => r.id);
         if (jobIds.length === 0) {
           setLeads([]);
           setTotalCount(0);
@@ -277,15 +278,59 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
           setIsLoading(false);
           return;
         }
-        query = query.in('scraping_job_id', jobIds);
       }
-      const { data, error: queryError, count } = await query;
 
-      if (queryError) throw queryError;
+      const attachSavedSearch = (q: Exclude<ReturnType<typeof buildLeadsOrderedQuery>, null>) =>
+        jobIds ? q.in('scraping_job_id', jobIds) : q;
 
-      setLeads(data || []);
-      setTotalCount(count || 0);
-      setPagination(prev => ({ ...prev, total: count || 0 }));
+      if (fetchFullFilteredSet) {
+        const merged: Lead[] = [];
+        let offset = 0;
+        let total: number | null = null;
+
+        while (offset < FULL_FETCH_CAP) {
+          const base = buildLeadsOrderedQuery();
+          if (!base) {
+            setLeads([]);
+            setTotalCount(0);
+            setIsLoading(false);
+            return;
+          }
+          const to = Math.min(offset + FULL_FETCH_BATCH - 1, FULL_FETCH_CAP - 1);
+          const { data, error: queryError, count } = await attachSavedSearch(base).range(offset, to);
+
+          if (queryError) throw queryError;
+          if (total == null && count != null) total = count;
+
+          const chunk = data || [];
+          merged.push(...chunk);
+          if (chunk.length === 0) break;
+          if (chunk.length < FULL_FETCH_BATCH) break;
+          if (total != null && merged.length >= total) break;
+          offset += chunk.length;
+        }
+
+        setLeads(merged);
+        setTotalCount(total ?? merged.length);
+        setPagination((prev) => ({ ...prev, total: total ?? merged.length }));
+      } else {
+        const base = buildLeadsOrderedQuery();
+        if (!base) {
+          setLeads([]);
+          setTotalCount(0);
+          setIsLoading(false);
+          return;
+        }
+        const from = (pagination.page - 1) * pagination.pageSize;
+        const to = from + pagination.pageSize - 1;
+        const { data, error: queryError, count } = await attachSavedSearch(base).range(from, to);
+
+        if (queryError) throw queryError;
+
+        setLeads(data || []);
+        setTotalCount(count || 0);
+        setPagination((prev) => ({ ...prev, total: count || 0 }));
+      }
     } catch (err) {
       const rawMessage =
         err instanceof Error
@@ -317,7 +362,14 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [buildQuery, filters.saved_search_id, sort.column]);
+  }, [
+    buildLeadsOrderedQuery,
+    fetchFullFilteredSet,
+    filters.saved_search_id,
+    pagination.page,
+    pagination.pageSize,
+    sort.column,
+  ]);
 
   // Initial fetch and refetch on filter/sort/pagination changes
   useEffect(() => {

@@ -56,11 +56,11 @@ export default {
           lost: "hsl(var(--stage-lost))",
           disqualified: "hsl(var(--stage-disqualified))",
         },
-        // Vloom-style dark theme (ideas.wearevloom.com)
+        // Vloom / dashboard surfaces — alineados al mismo base que --background (#1a1b21)
         vloom: {
-          bg: '#0c0c0e',
-          surface: '#16161a',
-          border: '#2a2a2e',
+          bg: '#1a1b21',
+          surface: '#22232b',
+          border: '#2e3039',
           muted: '#71717a',
           text: '#fafafa',
           accent: '#8b5cf6',

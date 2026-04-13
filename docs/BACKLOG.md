@@ -73,6 +73,9 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Saved searches: banner Send to leads minimal (sin JWT / deploy / Refresh session)
 - [x] CRM: importar leads desde CSV (botón Import CSV + upsert a `leads`)
 - [x] CRM: fix error Vite/TS en `CRMView` (JSX desbalanceado/duplicado + `Columns3` → `Columns`)
+- [x] CRM: Kanban muestra leads antiguos (sube `pageSize` para evitar “missing” en Negotiation sin búsqueda)
+- [x] CRM: Kanban ignora colapso “By companies” (una tarjeta por lead; colapso solo en tabla)
+- [x] CRM / FilterBar: opción **By both** como vista por defecto + By people / By companies
 
 ---
 

@@ -109,12 +109,12 @@ export default function DashboardPage() {
     if (filters.tags?.length) count++;
     if (filters.saved_search_id) count++;
     if (filters.marked_as_lead_only === true) count++;
-    if (filters.view_by) count++;
+    if (filters.view_by && filters.view_by !== 'both') count++;
     return count;
   }, [filters]);
 
   const { displayLeads, groupSizeByLeadId } = useMemo(
-    () => getDisplayLeadsForView(leads, filters.view_by),
+    () => getDisplayLeadsForView(leads, filters.view_by ?? 'both'),
     [leads, filters.view_by]
   );
 

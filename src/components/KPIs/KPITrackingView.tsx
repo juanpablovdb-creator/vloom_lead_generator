@@ -20,6 +20,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { SUPABASE_CONFIG_HINT } from '@/lib/supabase';
 import type { Lead, LeadStatus } from '@/types/database';
+import { CrmDateInput } from '@/components/CRM/CrmDateInput';
 
 const DEFAULT_NUM_WEEKS = 4;
 
@@ -487,22 +488,22 @@ export function KPITrackingView() {
             )}
           </div>
           {/* First contact date filter (same as CRM) */}
-          <label className="flex items-center gap-2 text-sm text-vloom-text">
+          <label className="flex flex-wrap items-center gap-2 text-sm text-vloom-text">
             <span className="text-vloom-muted">First contact:</span>
-            <input
-              type="date"
-              value={firstContactedFrom ?? ''}
-              onChange={(e) => updateFilter('first_contacted_from', e.target.value || undefined)}
-              className="px-2 py-1.5 rounded-lg border border-vloom-border bg-vloom-bg text-vloom-text text-sm"
+            <CrmDateInput
+              fieldTone="dark"
+              value={firstContactedFrom}
+              onChange={(v) => updateFilter('first_contacted_from', v)}
               title="First contact from"
+              inputClassName="text-sm"
             />
             <span className="text-vloom-muted">to</span>
-            <input
-              type="date"
-              value={firstContactedTo ?? ''}
-              onChange={(e) => updateFilter('first_contacted_to', e.target.value || undefined)}
-              className="px-2 py-1.5 rounded-lg border border-vloom-border bg-vloom-bg text-vloom-text text-sm"
+            <CrmDateInput
+              fieldTone="dark"
+              value={firstContactedTo}
+              onChange={(v) => updateFilter('first_contacted_to', v)}
               title="First contact to"
+              inputClassName="text-sm"
             />
             {(firstContactedFrom || firstContactedTo) && (
               <button

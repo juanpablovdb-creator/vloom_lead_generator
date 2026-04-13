@@ -67,7 +67,9 @@ export function CRMKanban({
     const map = new Map<LeadStatus, Lead[]>();
     for (const stage of PIPELINE_STAGES) map.set(stage.id, []);
     for (const lead of leads) {
-      const status = lead.status as LeadStatus;
+      const status = String(lead.status ?? '')
+        .trim()
+        .toLowerCase() as LeadStatus;
       const targetStatus = map.has(status) ? status : 'backlog';
       // Backlog column: only show leads the user marked as lead
       if (targetStatus === 'backlog' && !lead.is_marked_as_lead) continue;
