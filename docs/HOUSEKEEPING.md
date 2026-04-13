@@ -6,6 +6,7 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
+- **Fechas first contact unificadas:** `dateUtils` exporta `firstContactFilterGteBound` / `firstContactFilterLteBound` (mismo rango que CRM) y `lastFridayDateOnly`; KPI cohort filter y KPI bulk default alineados; `CRMView` reutiliza `lastFridayDateOnly`.
 - **KPIs — Bulk first contact desde el modal:** En **First contact (Companies)** el modal abre sin selección; checkboxes + **Select all** (`text-vloom-muted`), fecha y **Apply (N)**; refresca cohorte.
 - **Tema oscuro unificado (~#1a1b21):** `--background` / `--card` en `index.css` y tokens `vloom.bg` / `vloom.surface` en `tailwind.config.js` alineados al mismo carbón; bordes `border`/`input` ajustados. **`CrmDateInput` `fieldTone="dark"`** y barra **First contact** en CRM usan `bg-background`, `border-border`, `text-foreground` (no un negro aparte).
 - **CRM — Toolbar First contact:** El bloque de fechas ya no lleva `border` ni fondo aparte (`bg-transparent`) para quitar la línea/caja alrededor del grupo.

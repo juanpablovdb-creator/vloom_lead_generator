@@ -16,6 +16,7 @@ import { LeadsTable } from '@/components/LeadsTable';
 import { FilterBar } from '@/components/FilterBar';
 import { LeadCardPopup } from './LeadCardPopup';
 import { CrmDateInput } from './CrmDateInput';
+import { lastFridayDateOnly } from '@/lib/dateUtils';
 
 const CHANNEL_OPTIONS = LEAD_CHANNEL_OPTIONS;
 
@@ -323,19 +324,6 @@ export function CRMView() {
   const [csvBatchUpdateError, setCsvBatchUpdateError] = useState<string | null>(null);
   const { tasks, updateTaskStatus, updateTaskTitle, deleteTask, createTask, refreshTasks } = useTasks();
   const [bulkFirstContactDate, setBulkFirstContactDate] = useState('');
-
-  function lastFridayDateOnly(): string {
-    const now = new Date();
-    // JS: 0=Sun ... 5=Fri
-    const day = now.getDay();
-    const delta = (day + 2) % 7; // days since Friday (Fri->0, Sat->1, Sun->2, ...)
-    const lastFri = new Date(now);
-    lastFri.setDate(now.getDate() - (delta === 0 ? 7 : delta)); // if today is Fri, go to previous Friday
-    const y = lastFri.getFullYear();
-    const m = String(lastFri.getMonth() + 1).padStart(2, '0');
-    const d = String(lastFri.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
 
   const [csvBatchFirstContactDate, setCsvBatchFirstContactDate] = useState<string>(() => lastFridayDateOnly());
 

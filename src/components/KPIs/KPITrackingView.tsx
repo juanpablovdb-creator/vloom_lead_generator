@@ -9,7 +9,12 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { ChevronDown, Loader2, X } from 'lucide-react';
 import { useLeads } from '@/hooks/useLeads';
 import { LEAD_CHANNEL_OPTIONS } from '@/lib/leadChannels';
-import { dateOnlyToISO } from '@/lib/dateUtils';
+import {
+  dateOnlyToISO,
+  firstContactFilterGteBound,
+  firstContactFilterLteBound,
+  lastFridayDateOnly,
+} from '@/lib/dateUtils';
 import {
   computeKPIsByWeek,
   formatWeekRange,
@@ -217,8 +222,13 @@ function useFirstInviteSentByLead(params?: {
   const fetchHistory = useCallback(async () => {
     if (!supabase) return;
 
-    const fromIso = params?.firstContactedFrom ? dateOnlyToISO(params.firstContactedFrom) : undefined;
-    const toIso = params?.firstContactedTo ? dateOnlyToISO(params.firstContactedTo) : undefined;
+    // Same calendar-day bounds as CRM `useLeads` (start/end of local day), not noon — avoids KPI/CRM mismatch.
+    const fromIso = params?.firstContactedFrom
+      ? firstContactFilterGteBound(params.firstContactedFrom)
+      : undefined;
+    const toIso = params?.firstContactedTo
+      ? firstContactFilterLteBound(params.firstContactedTo)
+      : undefined;
 
     const withinRange = (iso: string): boolean => {
       if (fromIso && iso < fromIso) return false;
@@ -371,7 +381,7 @@ export function KPITrackingView() {
   const [listPopover, setListPopover] = useState<PopoverState>(null);
   const [channelOpen, setChannelOpen] = useState(false);
   const [kpiCohortRefreshKey, setKpiCohortRefreshKey] = useState(0);
-  const [bulkFirstContactDate, setBulkFirstContactDate] = useState('2026-04-10');
+  const [bulkFirstContactDate, setBulkFirstContactDate] = useState(() => lastFridayDateOnly());
   const [bulkFirstContactSaving, setBulkFirstContactSaving] = useState(false);
   const [bulkFirstContactError, setBulkFirstContactError] = useState<string | null>(null);
   const [kpiFirstContactSelectedIds, setKpiFirstContactSelectedIds] = useState<Set<string>>(new Set());
@@ -609,7 +619,7 @@ export function KPITrackingView() {
                   <CrmDateInput
                     fieldTone="light"
                     value={bulkFirstContactDate}
-                    onChange={(v) => setBulkFirstContactDate(v ?? '2026-04-10')}
+                    onChange={(v) => setBulkFirstContactDate(v ?? lastFridayDateOnly())}
                     title="New first contact date for selected leads"
                     wrapperClassName="flex-1 min-w-[10rem]"
                     inputClassName="text-sm"
