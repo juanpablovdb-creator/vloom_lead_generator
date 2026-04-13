@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { LeadFilters, LeadStatus, LeadViewBy } from '@/types/database';
 import { useSavedSearches } from '@/hooks/useSavedSearches';
+import { LEAD_CHANNEL_OPTIONS } from '@/lib/leadChannels';
 
 interface FilterBarProps {
   filters: LeadFilters;
@@ -45,19 +46,7 @@ const SOURCE_OPTIONS = [
   { value: 'glassdoor', label: 'Glassdoor' },
 ];
 
-const CHANNEL_OPTIONS = [
-  { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
-  { value: 'LinkedIn', label: 'LinkedIn' },
-  { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
-  { value: 'LinkedIn Post Feeds', label: 'LinkedIn Post Feeds' },
-  { value: 'Website', label: 'Website' },
-  { value: 'Referral', label: 'Referral' },
-  { value: 'Event', label: 'Event' },
-  { value: 'Cold outreach', label: 'Cold outreach' },
-  { value: 'Email', label: 'Email' },
-  { value: 'Youtube Jobs', label: 'Youtube Jobs' },
-  { value: 'Other', label: 'Other' },
-];
+const CHANNEL_OPTIONS = LEAD_CHANNEL_OPTIONS;
 
 const COMPANY_SIZE_OPTIONS = [
   { value: '1-10', label: '1-10 employees' },
@@ -107,14 +96,14 @@ function FilterDropdown({
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
           hasSelection
-            ? 'border-vloom-accent/40 bg-vloom-accent/10 text-vloom-accent'
-            : 'border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-bg'
+            ? 'border-primary/40 bg-primary/10 text-primary'
+            : 'border-border bg-card text-foreground hover:bg-secondary/30'
         }`}
       >
         <Icon className="w-4 h-4" />
         <span className="text-sm font-medium">{label}</span>
         {hasSelection && (
-          <span className="ml-1 px-1.5 py-0.5 bg-vloom-accent/10 text-vloom-accent rounded text-xs font-medium">
+          <span className="ml-1 px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs font-medium">
             {selectedValues.length}
           </span>
         )}
@@ -124,18 +113,18 @@ function FilterDropdown({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute left-0 mt-2 w-56 bg-vloom-surface rounded-lg shadow-lg border border-vloom-border py-2 z-20 max-h-64 overflow-y-auto">
+          <div className="absolute left-0 mt-2 w-56 bg-card rounded-lg shadow-lg border border-border py-2 z-20 max-h-64 overflow-y-auto">
             {options.map((option) => (
               <button
                 key={option.value}
                 onClick={() => handleToggle(option.value)}
-                className="w-full px-3 py-2 text-left text-sm text-vloom-text hover:bg-vloom-bg flex items-center justify-between"
+                className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-secondary/30 flex items-center justify-between"
               >
-                <span className={selectedValues.includes(option.value) ? 'text-vloom-accent font-medium' : 'text-vloom-text'}>
+                <span className={selectedValues.includes(option.value) ? 'text-primary font-medium' : 'text-foreground'}>
                   {option.label}
                 </span>
                 {selectedValues.includes(option.value) && (
-                  <Check className="w-4 h-4 text-vloom-accent" />
+                  <Check className="w-4 h-4 text-primary" />
                 )}
               </button>
             ))}
@@ -169,17 +158,17 @@ function ToggleFilter({
       onClick={() => onChange(getNextValue())}
       className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
         value === true
-          ? 'border-green-200 bg-green-50 text-green-700'
+          ? 'border-primary/40 bg-primary/10 text-foreground'
           : value === false
-          ? 'border-red-200 bg-red-50 text-red-700'
-          : 'border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-bg'
+          ? 'border-destructive/40 bg-destructive/10 text-foreground'
+          : 'border-border bg-card text-foreground hover:bg-secondary/30'
       }`}
     >
       <Icon className="w-4 h-4" />
       <span className="text-sm font-medium">{label}</span>
       {value !== undefined && (
         <span className={`ml-1 px-1.5 py-0.5 rounded text-xs font-medium ${
-          value ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+          value ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'
         }`}>
           {value ? 'Yes' : 'No'}
         </span>
@@ -200,13 +189,13 @@ export function FilterBar({
   const [showScoreFilter, setShowScoreFilter] = useState(false);
 
   return (
-    <div className="bg-vloom-surface rounded-xl border border-vloom-border p-4">
+    <div className="bg-card rounded-xl border border-border p-4">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Filter className="w-5 h-5 text-vloom-muted" />
-          <span className="font-medium text-vloom-text">Filters</span>
+          <Filter className="w-5 h-5 text-muted-foreground" />
+          <span className="font-medium text-foreground">Filters</span>
           {activeFilterCount > 0 && (
-            <span className="px-2 py-0.5 bg-vloom-accent/10 text-vloom-accent rounded-full text-xs font-medium">
+            <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs font-medium">
               {activeFilterCount} active
             </span>
           )}
@@ -214,7 +203,7 @@ export function FilterBar({
         {activeFilterCount > 0 && (
           <button
             onClick={onClearFilters}
-            className="text-sm text-vloom-muted hover:text-vloom-text flex items-center gap-1"
+            className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
           >
             <X className="w-4 h-4" />
             Clear all
@@ -230,12 +219,12 @@ export function FilterBar({
             value={filters.search || ''}
             onChange={(e) => onFilterChange('search', e.target.value || undefined)}
             placeholder="Search leads..."
-            className="w-full pl-3 pr-8 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent bg-vloom-surface"
+            className="w-full pl-3 pr-8 py-2 border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 bg-secondary"
           />
           {filters.search && (
             <button
               onClick={() => onFilterChange('search', undefined)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-vloom-muted hover:text-vloom-text"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               <X className="w-4 h-4" />
             </button>
@@ -257,8 +246,8 @@ export function FilterBar({
             onClick={() => setShowViewByDropdown(!showViewByDropdown)}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
               filters.view_by
-                ? 'border-vloom-accent/40 bg-vloom-accent/10 text-vloom-accent'
-                : 'border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-bg'
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-border bg-card text-foreground hover:bg-secondary/30'
             }`}
           >
             {filters.view_by === 'company' ? (
@@ -274,14 +263,14 @@ export function FilterBar({
           {showViewByDropdown && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowViewByDropdown(false)} />
-              <div className="absolute left-0 mt-2 w-44 bg-vloom-surface rounded-lg shadow-lg border border-vloom-border py-2 z-20">
+              <div className="absolute left-0 mt-2 w-44 bg-card rounded-lg shadow-lg border border-border py-2 z-20">
                 <button
                   onClick={() => {
                     onFilterChange('view_by', 'person' as LeadViewBy);
                     setShowViewByDropdown(false);
                   }}
                   className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
-                    filters.view_by !== 'company' ? 'text-vloom-accent font-medium bg-vloom-accent/10' : 'text-vloom-text hover:bg-vloom-bg'
+                    filters.view_by !== 'company' ? 'text-primary font-medium bg-primary/10' : 'text-foreground hover:bg-secondary/30'
                   }`}
                 >
                   <Users className="w-4 h-4" />
@@ -293,7 +282,7 @@ export function FilterBar({
                     setShowViewByDropdown(false);
                   }}
                   className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
-                    filters.view_by === 'company' ? 'text-vloom-accent font-medium bg-vloom-accent/10' : 'text-vloom-text hover:bg-vloom-bg'
+                    filters.view_by === 'company' ? 'text-primary font-medium bg-primary/10' : 'text-foreground hover:bg-secondary/30'
                   }`}
                 >
                   <Building className="w-4 h-4" />
@@ -310,8 +299,8 @@ export function FilterBar({
             onClick={() => setShowSavedSearchDropdown(!showSavedSearchDropdown)}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
               filters.saved_search_id
-                ? 'border-vloom-accent/40 bg-vloom-accent/10 text-vloom-accent'
-                : 'border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-bg'
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-border bg-card text-foreground hover:bg-secondary/30'
             }`}
           >
             <FolderOpen className="w-4 h-4" />
@@ -325,13 +314,13 @@ export function FilterBar({
           {showSavedSearchDropdown && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowSavedSearchDropdown(false)} />
-              <div className="absolute left-0 mt-2 w-56 bg-vloom-surface rounded-lg shadow-lg border border-vloom-border py-2 z-20 max-h-64 overflow-y-auto">
+              <div className="absolute left-0 mt-2 w-56 bg-card rounded-lg shadow-lg border border-border py-2 z-20 max-h-64 overflow-y-auto">
                 <button
                   onClick={() => {
                     onFilterChange('saved_search_id', undefined);
                     setShowSavedSearchDropdown(false);
                   }}
-                  className="w-full px-3 py-2 text-left text-sm text-vloom-text hover:bg-vloom-bg"
+                  className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-secondary/30"
                 >
                   All
                 </button>
@@ -343,11 +332,11 @@ export function FilterBar({
                       setShowSavedSearchDropdown(false);
                     }}
                     className={`w-full px-3 py-2 text-left text-sm flex items-center justify-between ${
-                      filters.saved_search_id === s.id ? 'text-vloom-accent font-medium bg-vloom-accent/10' : 'text-vloom-text hover:bg-vloom-bg'
+                      filters.saved_search_id === s.id ? 'text-primary font-medium bg-primary/10' : 'text-foreground hover:bg-secondary/30'
                     }`}
                   >
                     <span className="truncate">{s.name}</span>
-                    {filters.saved_search_id === s.id && <Check className="w-4 h-4 text-vloom-accent flex-shrink-0" />}
+                    {filters.saved_search_id === s.id && <Check className="w-4 h-4 text-primary flex-shrink-0" />}
                   </button>
                 ))}
               </div>
@@ -412,14 +401,14 @@ export function FilterBar({
             onClick={() => setShowScoreFilter(!showScoreFilter)}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
               filters.score_min !== undefined || filters.score_max !== undefined
-                ? 'border-blue-200 bg-blue-50 text-blue-700'
-                : 'border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-bg'
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-border bg-card text-foreground hover:bg-secondary/30'
             }`}
           >
             <Sliders className="w-4 h-4" />
             <span className="text-sm font-medium">Score</span>
             {(filters.score_min !== undefined || filters.score_max !== undefined) && (
-              <span className="ml-1 px-1.5 py-0.5 bg-vloom-accent/10 text-vloom-accent rounded text-xs font-medium">
+              <span className="ml-1 px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs font-medium">
                 {filters.score_min ?? 0}-{filters.score_max ?? 100}
               </span>
             )}
@@ -429,8 +418,8 @@ export function FilterBar({
           {showScoreFilter && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowScoreFilter(false)} />
-              <div className="absolute left-0 mt-2 w-64 bg-vloom-surface rounded-lg shadow-lg border border-vloom-border p-4 z-20">
-                <label className="block text-sm font-medium text-vloom-text mb-2">
+              <div className="absolute left-0 mt-2 w-64 bg-card rounded-lg shadow-lg border border-border p-4 z-20">
+                <label className="block text-sm font-medium text-foreground mb-2">
                   Score Range
                 </label>
                 <div className="flex items-center gap-3">
@@ -441,9 +430,9 @@ export function FilterBar({
                     placeholder="Min"
                     min={0}
                     max={100}
-                    className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-surface"
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm text-foreground bg-secondary"
                   />
-                  <span className="text-vloom-muted">-</span>
+                  <span className="text-muted-foreground">-</span>
                   <input
                     type="number"
                     value={filters.score_max ?? ''}
@@ -451,7 +440,7 @@ export function FilterBar({
                     placeholder="Max"
                     min={0}
                     max={100}
-                    className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-surface"
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm text-foreground bg-secondary"
                   />
                 </div>
                 <div className="flex gap-2 mt-3">
@@ -466,7 +455,7 @@ export function FilterBar({
                         onFilterChange('score_min', preset.min);
                         onFilterChange('score_max', preset.max);
                       }}
-                      className="px-2 py-1 text-xs bg-vloom-border hover:bg-vloom-border rounded text-vloom-muted"
+                      className="px-2 py-1 text-xs bg-secondary hover:bg-secondary/70 rounded text-muted-foreground"
                     >
                       {preset.label}
                     </button>
@@ -482,8 +471,8 @@ export function FilterBar({
           onClick={() => onFilterChange('show_shared', !filters.show_shared)}
           className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
             filters.show_shared
-              ? 'border-vloom-accent/40 bg-vloom-accent/10 text-vloom-accent'
-              : 'border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-bg'
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-border bg-card text-foreground hover:bg-secondary/30'
           }`}
         >
           <span className="text-sm font-medium">Show shared leads</span>

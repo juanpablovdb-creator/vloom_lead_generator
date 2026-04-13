@@ -60,6 +60,8 @@ export interface Lead {
   id: string;
   user_id: string;
   is_shared: boolean;
+  /** Manual owner for CRM segmentation (tabs by assignee). */
+  assignee: string | null;
   
   // Job Post Info
   job_title: string | null;
@@ -331,6 +333,12 @@ export interface LeadFilters {
   view_by?: LeadViewBy;
   /** Filter by channel (e.g. LinkedIn, Website). */
   channel?: string[];
+  /** Filter by assignee (for CRM tabs). */
+  assignee?: string[];
+  /** Filter by first_contacted_at date range (YYYY-MM-DD or ISO). */
+  first_contacted_from?: string;
+  /** Filter by first_contacted_at date range (YYYY-MM-DD or ISO). */
+  first_contacted_to?: string;
 }
 
 export interface LeadSort {

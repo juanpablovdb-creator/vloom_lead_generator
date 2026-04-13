@@ -88,6 +88,24 @@ function isUrl(s: string): boolean {
   return URL_REGEX.test(s.trim());
 }
 
+function safeHostname(urlLike: string | null | undefined): string | null {
+  const raw = (urlLike ?? '').trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(raw.includes('://') ? raw : `https://${raw}`);
+    const host = u.hostname.replace(/^www\./i, '').trim();
+    return host || null;
+  } catch {
+    return null;
+  }
+}
+
+function logoUrlForLead(lead: Lead): string | null {
+  const host = safeHostname(lead.company_url) ?? safeHostname(lead.company_linkedin_url);
+  if (!host) return null;
+  return `https://logo.clearbit.com/${host}`;
+}
+
 export interface LeadCardPopupProps {
   lead: Lead;
   /** When opened from Tasks, the task that was clicked (for editing task status). */
@@ -226,6 +244,21 @@ export function LeadCardPopup({
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
+          <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Assignee</div>
+          <input
+            type="text"
+            value={localLead.assignee ?? ''}
+            onChange={(e) => setLocalLead({ ...localLead, assignee: e.target.value })}
+            onBlur={async () => {
+              const v = (localLead.assignee ?? '').trim() || null;
+              await onUpdateLead(localLead.id, { assignee: v });
+              setLocalLead((prev) => ({ ...prev, assignee: v }));
+            }}
+            placeholder="e.g. Andres Leal"
+            className="w-full max-w-xs rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+          />
+        </div>
+        <div>
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Website</div>
           {localLead.company_url ? (
             <a href={localLead.company_url} target="_blank" rel="noopener noreferrer" className="text-sm text-vloom-accent hover:underline break-all">
@@ -322,10 +355,23 @@ export function LeadCardPopup({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-vloom-border">
-          <div>
-            <h2 className="text-lg font-semibold text-vloom-text">
-              {localLead.company_name || localLead.contact_name || localLead.job_title || 'Lead details'}
-            </h2>
+          <div className="flex items-center gap-3 min-w-0">
+            {logoUrlForLead(localLead) ? (
+              <img
+                src={logoUrlForLead(localLead)!}
+                alt=""
+                className="w-9 h-9 rounded-lg border border-vloom-border bg-vloom-bg object-contain flex-shrink-0"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-lg border border-vloom-border bg-vloom-bg flex-shrink-0" />
+            )}
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-vloom-text truncate">
+                {localLead.company_name || localLead.contact_name || localLead.job_title || 'Lead details'}
+              </h2>
             {localLead.job_title && (
               <p className="text-sm text-vloom-muted">
                 {localLead.job_title}
@@ -334,6 +380,7 @@ export function LeadCardPopup({
                 )}
               </p>
             )}
+            </div>
           </div>
           <button type="button" onClick={onClose} className="p-2 rounded-md text-vloom-muted hover:text-vloom-text hover:bg-vloom-border/30">
             <X className="w-5 h-5" />

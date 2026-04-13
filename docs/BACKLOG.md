@@ -41,7 +41,11 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Documentar Sprint/Wave
 - [x] Pre-mortems iniciales
 - [x] Proceso diario (PROCESS.md)
+- [x] KPIs: fila "Video Sent" por cohorte debajo de Connected (y cohorte sin fallback `updated_at`)
+- [x] CRM: fix búsqueda (coma/% rompe PostgREST `or()` → "failed to parse logic tree")
+- [x] CRM: canales sin duplicados + abrir sin filtros + sort por “Last contacted” por defecto
 - [ ] Revisar y ejecutar migraciones Supabase
+- [x] CRM: cards con logo + íconos + campo `assignee` y tabs por assignee
 - [x] Guía de salida a producción (DEPLOY.md + vercel.json + netlify.toml)
 - [x] Build de producción (TypeScript corregido; npm run build pasa)
 - [x] Saved searches: quitar “Save this search” + renombrado inline sin bug de espacio
@@ -67,6 +71,8 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Enrich: fallback secret + anon Bearer tras Invalid JWT (fix throw tras enrich OK; Edge acepta JWT inválido + secret + userId)
 - [x] Dev: pantalla gris — tope de loading en OAuth/auth + vista Saved search eliminada + guardas en `main.tsx`
 - [x] Saved searches: banner Send to leads minimal (sin JWT / deploy / Refresh session)
+- [x] CRM: importar leads desde CSV (botón Import CSV + upsert a `leads`)
+- [x] CRM: fix error Vite/TS en `CRMView` (JSX desbalanceado/duplicado + `Columns3` → `Columns`)
 
 ---
 

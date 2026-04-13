@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase, getCurrentUser } from '@/lib/supabase';
 import type { Lead, LeadFilters, LeadSort, PaginationState, LeadStatus } from '@/types/database';
+import { LINKEDIN_POST_FEEDS_CHANNEL } from '@/lib/leadChannels';
 
 const SUPABASE_NOT_CONFIGURED = 'Configure Supabase: add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env';
 
@@ -25,6 +26,7 @@ export interface CreateLeadInput {
   channel?: string | null;
   status?: LeadStatus;
   first_contacted_at?: string | null;
+  assignee?: string | null;
 }
 
 interface UseLeadsOptions {
@@ -174,12 +176,29 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       query = query.lte('created_at', filters.date_to);
     }
 
+    // First contact date range filter (manual first_contacted_at)
+    if (filters.first_contacted_from) {
+      query = query.gte('first_contacted_at', filters.first_contacted_from);
+    }
+    if (filters.first_contacted_to) {
+      query = query.lte('first_contacted_at', filters.first_contacted_to);
+    }
+
     // Search filter (busca en múltiples campos)
     if (filters.search) {
-      const searchTerm = `%${filters.search}%`;
-      query = query.or(
-        `job_title.ilike.${searchTerm},company_name.ilike.${searchTerm},contact_name.ilike.${searchTerm},contact_email.ilike.${searchTerm}`
-      );
+      // Tokenize so punctuation (e.g. "Audacy, Inc.") doesn't prevent matches.
+      // Also strip user-entered `%` to avoid confusing wildcards.
+      const tokens = String(filters.search)
+        .replace(/%/g, ' ')
+        .split(/[^a-z0-9]+/i)
+        .map((t) => t.trim())
+        .filter(Boolean);
+      if (tokens.length > 0) {
+        const searchTerm = `%${tokens.join('%')}%`;
+        query = query.or(
+          `job_title.ilike.${searchTerm},company_name.ilike.${searchTerm},contact_name.ilike.${searchTerm},contact_email.ilike.${searchTerm}`
+        );
+      }
     }
 
     // Tags filter
@@ -189,7 +208,16 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
 
     // Channel filter
     if (filters.channel && filters.channel.length > 0) {
-      query = query.in('channel', filters.channel);
+      // Backward compatibility: early UI versions produced "LinkedIn Job Post Feeds".
+      // When user selects canonical "LinkedIn Post Feeds", include legacy value too.
+      const expanded = new Set(filters.channel);
+      if (expanded.has(LINKEDIN_POST_FEEDS_CHANNEL)) expanded.add('LinkedIn Job Post Feeds');
+      query = query.in('channel', Array.from(expanded));
+    }
+
+    // Assignee filter
+    if (filters.assignee && filters.assignee.length > 0) {
+      query = query.in('assignee', filters.assignee);
     }
 
     // Only show rows user marked as lead (for "Leads" / CRM view)
@@ -359,6 +387,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     const row = {
       user_id: user.id,
       is_shared: false,
+      assignee: data.assignee ?? null,
       job_title: data.job_title ?? null,
       job_description: null,
       job_url: null,
@@ -406,10 +435,15 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     }
     if (insertError) {
       const msg = insertError?.message ?? '';
-      if (/first_contacted_at/i.test(msg) && /does not exist|unknown column|column/i.test(msg)) {
-        const { first_contacted_at: _fc, ...rowWithout } = row as unknown as Record<string, unknown>;
-        void _fc;
-        const res2 = await insertOnce(rowWithout);
+      const isMissingColumn = /does not exist|unknown column|column/i.test(msg);
+      const missingFirstContactedAt = /first_contacted_at/i.test(msg) && isMissingColumn;
+      const missingAssignee = /assignee/i.test(msg) && isMissingColumn;
+
+      if (missingFirstContactedAt || missingAssignee) {
+        const copy = { ...(row as unknown as Record<string, unknown>) };
+        if (missingFirstContactedAt) delete copy.first_contacted_at;
+        if (missingAssignee) delete copy.assignee;
+        const res2 = await insertOnce(copy);
         if (res2.error) throw res2.error;
         inserted = res2.data;
       } else {

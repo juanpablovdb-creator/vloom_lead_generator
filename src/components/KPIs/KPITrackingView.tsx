@@ -8,6 +8,8 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useLeads } from '@/hooks/useLeads';
+import { LEAD_CHANNEL_OPTIONS } from '@/lib/leadChannels';
+import { dateOnlyToISO } from '@/lib/dateUtils';
 import {
   computeKPIsByWeek,
   formatWeekRange,
@@ -21,19 +23,7 @@ import type { Lead, LeadStatus } from '@/types/database';
 
 const DEFAULT_NUM_WEEKS = 4;
 
-const CHANNEL_OPTIONS = [
-  { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
-  { value: 'LinkedIn', label: 'LinkedIn' },
-  { value: 'LinkedIn Job Post', label: 'LinkedIn Job Post' },
-  { value: 'LinkedIn Post Feeds', label: 'LinkedIn Post Feeds' },
-  { value: 'Website', label: 'Website' },
-  { value: 'Referral', label: 'Referral' },
-  { value: 'Event', label: 'Event' },
-  { value: 'Cold outreach', label: 'Cold outreach' },
-  { value: 'Email', label: 'Email' },
-  { value: 'Youtube Jobs', label: 'Youtube Jobs' },
-  { value: 'Other', label: 'Other' },
-];
+const CHANNEL_OPTIONS = LEAD_CHANNEL_OPTIONS;
 
 /** Format count with rate vs denominator: "12 (24.00%)" for funnel rows. */
 function countWithRate(count: number, denominator: number): string {
@@ -150,6 +140,51 @@ function KpiRow({ label, cells, weeks, leadKey, highlight, onOpenList }: RowProp
   );
 }
 
+interface CustomLeadsRowProps {
+  label: string;
+  cells: (string | number)[];
+  weeks: WeekKPI[];
+  leadsByWeek: Lead[][];
+  highlight?: 'positive' | 'negative' | 'neutral';
+  onOpenList: (state: PopoverState) => void;
+}
+
+function KpiRowCustomLeads({
+  label,
+  cells,
+  weeks,
+  leadsByWeek,
+  highlight,
+  onOpenList,
+}: CustomLeadsRowProps) {
+  const rowBg =
+    highlight === 'positive'
+      ? 'bg-emerald-500/10'
+      : highlight === 'negative'
+        ? 'bg-red-500/10'
+        : '';
+  const stickyBg = 'bg-vloom-surface';
+  return (
+    <tr className={rowBg}>
+      <td
+        className={`sticky left-0 z-[1] ${stickyBg} px-4 py-2.5 text-left text-sm font-medium text-vloom-text border-b border-r border-vloom-border whitespace-nowrap min-w-[14rem]`}
+      >
+        {label}
+      </td>
+      {cells.map((cell, i) => (
+        <KpiCell
+          key={i}
+          cell={cell}
+          leads={leadsByWeek[i] ?? []}
+          rowLabel={label}
+          weekLabel={weeks[i]?.weekLabel ?? ''}
+          onOpenList={onOpenList}
+        />
+      ))}
+    </tr>
+  );
+}
+
 function WeekColumnHeader({ week }: { week: WeekKPI }) {
   const label = formatWeekRange(week.monday, week.sunday);
   return (
@@ -170,16 +205,27 @@ const KPI_COHORT_STATUSES: LeadStatus[] = [
 ];
 
 /** First time each lead was moved to invite_sent (from lead_status_history). */
-function useFirstInviteSentByLead(): Map<string, string> | null {
+function useFirstInviteSentByLead(params?: {
+  firstContactedFrom?: string;
+  firstContactedTo?: string;
+}): Map<string, string> | null {
   const [map, setMap] = useState<Map<string, string> | null>(null);
 
   const fetchHistory = useCallback(async () => {
     if (!supabase) return;
-    const { data, error } = await supabase
+
+    const fromIso = params?.firstContactedFrom ? dateOnlyToISO(params.firstContactedFrom) : undefined;
+    const toIso = params?.firstContactedTo ? dateOnlyToISO(params.firstContactedTo) : undefined;
+
+    let historyQuery = supabase
       .from('lead_status_history')
       .select('lead_id, changed_at')
       .eq('to_status', 'invite_sent')
       .order('changed_at', { ascending: true });
+    if (fromIso) historyQuery = historyQuery.gte('changed_at', fromIso);
+    if (toIso) historyQuery = historyQuery.lte('changed_at', toIso);
+
+    const { data, error } = await historyQuery;
     if (error) return;
     const byLead = new Map<string, string>();
     for (const row of (data ?? []) as { lead_id: string; changed_at: string }[]) {
@@ -187,28 +233,36 @@ function useFirstInviteSentByLead(): Map<string, string> | null {
     }
 
     // Fallback: include leads that are already in the funnel but are missing history.
-    // Prefer manual first_contacted_at for cohort; else updated_at/created_at.
+    // Prefer manual first_contacted_at for cohort.
+    // IMPORTANT: do NOT fallback to updated_at/created_at here — it inflates cohorts and breaks date filters.
     const { data: funnelLeads, error: funnelError } = await supabase
       .from('leads')
-      .select('id, created_at, updated_at, first_contacted_at')
+      .select('id, first_contacted_at')
       .eq('is_marked_as_lead', true)
       .neq('status', 'disqualified')
-      .in('status', KPI_COHORT_STATUSES);
+      .in('status', KPI_COHORT_STATUSES)
+      .not('first_contacted_at', 'is', null);
     if (!funnelError) {
+      // Apply same date filter as CRM (first_contacted_at range) when present.
+      const withinRange = (iso: string): boolean => {
+        if (fromIso && iso < fromIso) return false;
+        if (toIso && iso > toIso) return false;
+        return true;
+      };
+
       for (const row of (funnelLeads ?? []) as {
         id: string;
-        created_at: string;
-        updated_at: string;
         first_contacted_at: string | null;
       }[]) {
-        const date = row.first_contacted_at ?? row.updated_at ?? row.created_at;
-        if (row.first_contacted_at) byLead.set(row.id, row.first_contacted_at);
-        else if (!byLead.has(row.id)) byLead.set(row.id, date);
+        const at = row.first_contacted_at;
+        if (!at) continue;
+        if (!withinRange(at)) continue;
+        if (!byLead.has(row.id)) byLead.set(row.id, at);
       }
     }
 
     setMap(byLead);
-  }, []);
+  }, [params?.firstContactedFrom, params?.firstContactedTo]);
 
   useEffect(() => {
     fetchHistory();
@@ -316,6 +370,8 @@ export function KPITrackingView() {
   });
 
   const selectedChannels = filters.channel ?? [];
+  const firstContactedFrom = (filters as unknown as { first_contacted_from?: string }).first_contacted_from;
+  const firstContactedTo = (filters as unknown as { first_contacted_to?: string }).first_contacted_to;
   const channelLabel =
     selectedChannels.length === 0
       ? 'All channels'
@@ -323,7 +379,10 @@ export function KPITrackingView() {
         ? selectedChannels[0]
         : `${selectedChannels.length} channels`;
 
-  const firstInviteSentByLeadId = useFirstInviteSentByLead();
+  const firstInviteSentByLeadId = useFirstInviteSentByLead({
+    firstContactedFrom,
+    firstContactedTo,
+  });
   const stagesEverReachedByLeadId = useStagesEverReachedByLead();
   const { leads: kpiLeads, isLoading } = useLeadsForKPI(
     firstInviteSentByLeadId,
@@ -521,6 +580,20 @@ export function KPITrackingView() {
                 )}
                 weeks={weeks}
                 leadKey="connectedLeads"
+                onOpenList={setListPopover}
+              />
+              <KpiRowCustomLeads
+                label="Video Sent · Companies · rate vs First contact"
+                cells={weeks.map((w) =>
+                  countWithRate(
+                    w.peopleContactedLeads.filter((l) => (l.tags ?? []).includes('video_sent')).length,
+                    w.peopleContacted
+                  )
+                )}
+                weeks={weeks}
+                leadsByWeek={weeks.map((w) =>
+                  w.peopleContactedLeads.filter((l) => (l.tags ?? []).includes('video_sent'))
+                )}
                 onOpenList={setListPopover}
               />
               <KpiRow

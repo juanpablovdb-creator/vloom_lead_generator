@@ -5,6 +5,33 @@ import { useCallback, useMemo, useState } from 'react';
 import { CRMCard } from './CRMCard';
 import type { Lead, LeadStatus } from '@/types/database';
 
+function stageDotColor(status: LeadStatus): string {
+  switch (status) {
+    case 'backlog':
+      return 'hsl(var(--stage-backlog))';
+    case 'not_contacted':
+      return 'hsl(var(--stage-not-contacted))';
+    case 'invite_sent':
+      return 'hsl(var(--stage-first-contact))';
+    case 'connected':
+      return 'hsl(var(--stage-connected))';
+    case 'reply':
+      return 'hsl(var(--stage-reply))';
+    case 'positive_reply':
+      return 'hsl(var(--stage-positive-reply))';
+    case 'negotiation':
+      return 'hsl(var(--stage-negotiation))';
+    case 'closed':
+      return 'hsl(var(--stage-closed))';
+    case 'lost':
+      return 'hsl(var(--stage-lost))';
+    case 'disqualified':
+      return 'hsl(var(--stage-disqualified))';
+    default:
+      return 'hsl(var(--muted-foreground))';
+  }
+}
+
 const PIPELINE_STAGES: { id: LeadStatus; label: string }[] = [
   { id: 'backlog', label: 'Backlog' },
   { id: 'not_contacted', label: 'Not contacted' },
@@ -94,7 +121,7 @@ export function CRMKanban({
 
   return (
     <div
-      className="flex gap-3 overflow-x-auto pb-4 h-[80vh]"
+      className="flex gap-4 overflow-x-auto pb-4 h-[80vh]"
       onDragEnd={handleDragEnd}
     >
       {PIPELINE_STAGES.map(({ id, label }) => (
@@ -103,22 +130,17 @@ export function CRMKanban({
           onDragOver={(e) => handleDragOver(e, id)}
           onDragLeave={handleDragLeave}
           onDrop={(e) => handleDrop(e, id)}
-          className={`flex-shrink-0 w-64 min-w-[14rem] h-full flex flex-col rounded-lg border transition-colors ${
-            dragOverColumn === id
-              ? 'border-vloom-accent bg-vloom-accent/5'
-              : 'border-vloom-border bg-vloom-surface/50'
-          }`}
+          className="flex-shrink-0 w-72 flex flex-col"
         >
-          <div className="p-2 border-b border-vloom-border flex-shrink-0">
-            <span className="text-xs font-medium text-vloom-muted uppercase tracking-wide">
-              {label}
-            </span>
-            <span className="ml-1.5 text-xs text-vloom-muted">
-              ({leadsByStatus.get(id)?.length ?? 0})
-            </span>
+          <div className="flex items-center gap-2 mb-3 px-1 flex-shrink-0">
+            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: stageDotColor(id) }} />
+            <h3 className="text-xs font-semibold text-foreground uppercase tracking-wider">{label}</h3>
+            <span className="text-xs text-muted-foreground ml-auto">({leadsByStatus.get(id)?.length ?? 0})</span>
           </div>
           <div
-            className="p-2 space-y-2 flex-1 overflow-y-auto min-h-[120px]"
+            className={`space-y-3 flex-1 overflow-y-auto pr-1 min-h-[120px] rounded-lg border transition-colors ${
+              dragOverColumn === id ? 'border-primary bg-primary/5' : 'border-transparent bg-background/20'
+            } p-2`}
             onDragOver={(e) => handleDragOver(e, id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, id)}

@@ -2,9 +2,54 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Vloom-style base: clean background, body text */
-body {
-  @apply font-sans antialiased text-vloom-text bg-vloom-bg;
+@layer base {
+  :root {
+    /* CRM export theme tokens (Lovable Kanban look) */
+    --background: 228 14% 10%;
+    --foreground: 220 13% 91%;
+
+    --card: 228 12% 14%;
+    --card-foreground: 220 13% 91%;
+
+    --popover: 228 12% 14%;
+    --popover-foreground: 220 13% 91%;
+
+    --primary: 250 60% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 228 10% 20%;
+    --secondary-foreground: 220 13% 85%;
+
+    --muted: 228 10% 18%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 250 40% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 228 10% 22%;
+    --input: 228 10% 22%;
+    --ring: 250 60% 55%;
+
+    --radius: 0.5rem;
+
+    --stage-backlog: 220 10% 40%;
+    --stage-not-contacted: 220 10% 50%;
+    --stage-first-contact: 200 60% 50%;
+    --stage-connected: 170 60% 45%;
+    --stage-reply: 45 80% 55%;
+    --stage-positive-reply: 140 60% 45%;
+    --stage-negotiation: 280 50% 55%;
+    --stage-closed: 160 70% 40%;
+    --stage-lost: 0 60% 50%;
+    --stage-disqualified: 0 40% 40%;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
 }
 
 /* Custom scrollbar (dark theme) */
@@ -14,22 +59,22 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #16161a;
+  background: hsl(var(--background));
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a2a2e;
+  background: hsl(var(--border));
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #71717a;
+  background: hsl(var(--muted-foreground));
 }
 
 /* Focus styles */
 *:focus-visible {
-  outline: 2px solid #8b5cf6;
+  outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
 

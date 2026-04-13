@@ -1,9 +1,8 @@
 // =====================================================
 // Leadflow Vloom - CRM card (Kanban)
 // =====================================================
-import { useState } from 'react';
 import type { Lead } from '@/types/database';
-import { supabase } from '@/lib/supabase';
+import { ExternalLink, MapPin, Briefcase, User, CheckCircle2, Circle } from 'lucide-react';
 
 interface CRMCardProps {
   lead: Lead;
@@ -20,14 +19,35 @@ function companyFromHeadline(headline: string | null | undefined): string {
   return (m[1].split('|')[0] ?? m[1]).trim();
 }
 
-export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProps) {
-  const [isNotesOpen, setIsNotesOpen] = useState(false);
-  const [notesDraft, setNotesDraft] = useState<string>(lead.notes ?? '');
-  const [savingNotes, setSavingNotes] = useState(false);
-  const [isTaskOpen, setIsTaskOpen] = useState(false);
-  const [taskTitle, setTaskTitle] = useState('');
-  const [savingTask, setSavingTask] = useState(false);
+function safeHostname(urlLike: string | null | undefined): string | null {
+  const raw = (urlLike ?? '').trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(raw.includes('://') ? raw : `https://${raw}`);
+    const host = u.hostname.replace(/^www\./i, '').trim();
+    return host || null;
+  } catch {
+    return null;
+  }
+}
 
+function initialsFromName(name: string): string {
+  const parts = name
+    .split(/\s+/g)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const a = (parts[0]?.[0] ?? '').toUpperCase();
+  const b = (parts[1]?.[0] ?? parts[0]?.[1] ?? '').toUpperCase();
+  return `${a}${b}`.trim() || '—';
+}
+
+function logoUrlForLead(lead: Lead): string | null {
+  const host = safeHostname(lead.company_url) ?? safeHostname(lead.company_linkedin_url);
+  if (!host) return null;
+  return `https://logo.clearbit.com/${host}`;
+}
+
+export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProps) {
   const companyStr = lead.company_name?.trim() || '';
   const contactStr = lead.contact_name?.trim() || '';
   const jobStr = lead.job_title?.trim() || '';
@@ -49,6 +69,12 @@ export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProp
   }
   if (lead.company_industry && !parts.includes(lead.company_industry)) parts.push(lead.company_industry);
   const subLine = parts.slice(0, 3).join(' · ') || null;
+  const logoUrl = logoUrlForLead(lead);
+  const fallbackInitials = initialsFromName(companyStr || headlineCompany || contactStr || jobStr || 'Lead');
+
+  const locationLabel = (lead.company_location || lead.job_location || '').trim() || null;
+  const assigneeLabel = (lead.assignee || '').trim() || null;
+  const videoSent = lead.tags?.includes('video_sent') ?? false;
 
   return (
     <div
@@ -57,190 +83,96 @@ export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProp
       onClick={() => {
         if (onOpen) onOpen(lead);
       }}
-      className="bg-vloom-surface border border-vloom-border rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-vloom-accent/40 transition-colors min-h-[120px] flex flex-col gap-1"
+      className="bg-card border border-border rounded-lg p-4 cursor-pointer hover:border-primary/40 transition-colors space-y-2"
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-vloom-text truncate">{primaryTitle}</p>
-          {subLine && <p className="text-[11px] text-vloom-muted truncate mt-0.5 leading-tight">{subLine}</p>}
+        <div className="min-w-0">
+          <h3 className="font-semibold text-foreground text-sm truncate">{primaryTitle}</h3>
+          {subLine && <p className="text-muted-foreground text-xs truncate">{subLine}</p>}
+        </div>
+        <div className="flex-shrink-0">
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt=""
+              className="w-8 h-8 rounded object-cover flex-shrink-0"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          ) : (
+            <div className="w-8 h-8 rounded border border-border bg-background flex items-center justify-center text-[10px] font-semibold text-muted-foreground">
+              {fallbackInitials}
+            </div>
+          )}
         </div>
       </div>
-      <div className="mt-1 space-y-0.5 text-[11px] leading-snug text-vloom-muted">
-        {lead.job_title && (
-          <p>
-            <span className="font-medium text-vloom-text">Role: </span>
-            {lead.job_title}
-          </p>
+      <div className="space-y-1 text-xs">
+        {jobStr && (
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Briefcase className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate">{jobStr}</span>
+          </div>
         )}
-        {lead.company_location && (
-          <p>
-            <span className="font-medium text-vloom-text">Location: </span>
-            {lead.company_location}
-          </p>
+        {locationLabel && (
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <MapPin className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate">{locationLabel}</span>
+          </div>
         )}
-        {lead.channel && (
-          <p>
-            <span className="font-medium text-vloom-text">Channel: </span>
-            {lead.channel}
-          </p>
+        {assigneeLabel && (
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <User className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate">{assigneeLabel}</span>
+          </div>
         )}
-        <div className="flex items-center justify-between">
-          <span className="font-medium text-vloom-text">Score: {lead.score}</span>
-          {lead.tags && lead.tags.length > 0 && <span>{lead.tags.length} tags</span>}
-        </div>
-        {lead.notes && (
-          <p className="mt-0.5 text-[11px] text-vloom-text/80 line-clamp-2">
-            {lead.notes}
-          </p>
-        )}
-      </div>
-      <div className="mt-2 pt-2 border-t border-vloom-border/60 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          className="flex-1 inline-flex items-center justify-center rounded-md border border-vloom-border px-2 py-1.5 text-[11px] font-medium text-vloom-text hover:border-vloom-accent hover:text-vloom-accent bg-vloom-surface/80"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsNotesOpen(true);
-          }}
-        >
-          Notes
-        </button>
-        <button
-          type="button"
-          className="flex-1 inline-flex items-center justify-center rounded-md border border-vloom-border px-2 py-1.5 text-[11px] font-medium text-vloom-text hover:border-vloom-accent hover:text-vloom-accent bg-vloom-surface/80"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsTaskOpen(true);
-          }}
-        >
-          Tasks
-        </button>
       </div>
 
-      {isNotesOpen && (
-        <div
-          className="absolute inset-0 z-10 flex items-center justify-center bg-black/40"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsNotesOpen(false);
-          }}
-        >
-          <div
-            className="w-full max-w-xs rounded-lg bg-vloom-surface border border-vloom-border p-3 text-[11px]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-semibold text-vloom-text text-xs">Notes</span>
-              <button
-                type="button"
-                className="text-[11px] text-vloom-muted hover:text-vloom-text"
-                onClick={() => setIsNotesOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-            <textarea
-              className="w-full h-20 rounded-md border border-vloom-border bg-vloom-surface text-[11px] text-vloom-text px-2 py-1 resize-none focus:outline-none focus:ring-1 focus:ring-vloom-accent"
-              placeholder="Write a quick note about this lead…"
-              value={notesDraft}
-              onChange={(e) => setNotesDraft(e.target.value)}
-            />
-            <div className="mt-2 flex justify-end gap-2">
-              <button
-                type="button"
-                className="px-2 py-1 text-[11px] text-vloom-muted hover:text-vloom-text"
-                onClick={() => setIsNotesOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={savingNotes || !onUpdateLead}
-                className="px-3 py-1 rounded-md bg-vloom-accent text-[11px] text-white disabled:opacity-60"
-                onClick={async () => {
-                  if (!onUpdateLead) return;
-                  setSavingNotes(true);
-                  try {
-                    await onUpdateLead(lead.id, { notes: notesDraft.trim() === '' ? null : notesDraft.trim() });
-                    setIsNotesOpen(false);
-                  } finally {
-                    setSavingNotes(false);
-                  }
-                }}
-              >
-                {savingNotes ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <div className="flex items-center justify-between pt-1">
+        <span className="text-xs font-medium text-muted-foreground">Score: {lead.score}</span>
+        {lead.tags && lead.tags.length > 0 && <span className="text-xs text-muted-foreground">{lead.tags.length} tags</span>}
+      </div>
 
-      {isTaskOpen && (
-        <div
-          className="absolute inset-0 z-10 flex items-center justify-center bg-black/40"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsTaskOpen(false);
-          }}
+      <button
+        type="button"
+        onClick={async (e) => {
+          e.stopPropagation();
+          if (!onUpdateLead) return;
+          const nextTags = videoSent ? (lead.tags ?? []).filter((t) => t !== 'video_sent') : [...(lead.tags ?? []), 'video_sent'];
+          await onUpdateLead(lead.id, { tags: nextTags });
+        }}
+        className={`flex items-center gap-1.5 text-xs pt-1 transition-colors ${
+          videoSent ? 'text-green-500' : 'text-muted-foreground hover:text-foreground'
+        } ${!onUpdateLead ? 'opacity-60 pointer-events-none' : ''}`}
+      >
+        {videoSent ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Circle className="w-3.5 h-3.5" />}
+        VIDEO SENT
+      </button>
+
+      <div className="flex gap-2 pt-1">
+        <a
+          href={lead.job_url ?? '#'}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className={`flex-1 flex items-center justify-center gap-1 text-xs py-1.5 border border-border rounded-md text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors ${
+            lead.job_url ? '' : 'pointer-events-none opacity-60'
+          }`}
         >
-          <div
-            className="w-full max-w-xs rounded-lg bg-vloom-surface border border-vloom-border p-3 text-[11px]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-semibold text-vloom-text text-xs">New task</span>
-              <button
-                type="button"
-                className="text-[11px] text-vloom-muted hover:text-vloom-text"
-                onClick={() => setIsTaskOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-            <input
-              type="text"
-              className="w-full rounded-md border border-vloom-border bg-vloom-surface text-[11px] text-vloom-text px-2 py-1 focus:outline-none focus:ring-1 focus:ring-vloom-accent"
-              placeholder="E.g. Call this lead on Monday"
-              value={taskTitle}
-              onChange={(e) => setTaskTitle(e.target.value)}
-            />
-            <div className="mt-2 flex justify-end gap-2">
-              <button
-                type="button"
-                className="px-2 py-1 text-[11px] text-vloom-muted hover:text-vloom-text"
-                onClick={() => setIsTaskOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={savingTask || !supabase}
-                className="px-3 py-1 rounded-md bg-vloom-accent text-[11px] text-white disabled:opacity-60"
-                onClick={async () => {
-                  if (!supabase) return;
-                  const title = (taskTitle || '').trim() || `Task for ${primaryTitle}`;
-                  setSavingTask(true);
-                  try {
-                    // Supabase client infers never for table insert; cast to satisfy typecheck (build)
-                    await supabase.from('tasks').insert({
-                      user_id: lead.user_id,
-                      lead_id: lead.id,
-                      title,
-                      status: 'pending',
-                    } as never);
-                    setTaskTitle('');
-                    setIsTaskOpen(false);
-                  } finally {
-                    setSavingTask(false);
-                  }
-                }}
-              >
-                {savingTask ? 'Creating…' : 'Create task'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          Job Post <ExternalLink className="w-3 h-3" />
+        </a>
+        <a
+          href={lead.company_linkedin_url || lead.company_url || '#'}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className={`flex-1 flex items-center justify-center gap-1 text-xs py-1.5 border border-border rounded-md text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors ${
+            lead.company_linkedin_url || lead.company_url ? '' : 'pointer-events-none opacity-60'
+          }`}
+        >
+          Company <ExternalLink className="w-3 h-3" />
+        </a>
+      </div>
     </div>
   );
 }

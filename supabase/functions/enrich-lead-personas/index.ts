@@ -405,7 +405,8 @@ Deno.serve(async (req: Request) => {
           scraping_job_id: null,
           job_external_id: null,
           is_marked_as_lead: true,
-          channel: "LinkedIn",
+          // Personas are derived from an originating lead/company; inherit its channel to keep reporting consistent.
+          channel: template.channel ?? "LinkedIn Job Post",
         };
 
         const { data: inserted, error: insertErr } = await supabase
