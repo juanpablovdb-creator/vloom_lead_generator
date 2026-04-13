@@ -6,7 +6,7 @@
 // Optional filter by channel to see KPIs per channel.
 
 import { useMemo, useState, useEffect, useCallback } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, X } from 'lucide-react';
 import { useLeads } from '@/hooks/useLeads';
 import { LEAD_CHANNEL_OPTIONS } from '@/lib/leadChannels';
 import { dateOnlyToISO } from '@/lib/dateUtils';
@@ -217,24 +217,12 @@ function useFirstInviteSentByLead(params?: {
     const fromIso = params?.firstContactedFrom ? dateOnlyToISO(params.firstContactedFrom) : undefined;
     const toIso = params?.firstContactedTo ? dateOnlyToISO(params.firstContactedTo) : undefined;
 
-    let historyQuery = supabase
-      .from('lead_status_history')
-      .select('lead_id, changed_at')
-      .eq('to_status', 'invite_sent')
-      .order('changed_at', { ascending: true });
-    if (fromIso) historyQuery = historyQuery.gte('changed_at', fromIso);
-    if (toIso) historyQuery = historyQuery.lte('changed_at', toIso);
+    const withinRange = (iso: string): boolean => {
+      if (fromIso && iso < fromIso) return false;
+      if (toIso && iso > toIso) return false;
+      return true;
+    };
 
-    const { data, error } = await historyQuery;
-    if (error) return;
-    const byLead = new Map<string, string>();
-    for (const row of (data ?? []) as { lead_id: string; changed_at: string }[]) {
-      if (!byLead.has(row.lead_id)) byLead.set(row.lead_id, row.changed_at);
-    }
-
-    // Fallback: include leads that are already in the funnel but are missing history.
-    // Prefer manual first_contacted_at for cohort.
-    // IMPORTANT: do NOT fallback to updated_at/created_at here — it inflates cohorts and breaks date filters.
     const { data: funnelLeads, error: funnelError } = await supabase
       .from('leads')
       .select('id, first_contacted_at')
@@ -242,23 +230,36 @@ function useFirstInviteSentByLead(params?: {
       .neq('status', 'disqualified')
       .in('status', KPI_COHORT_STATUSES)
       .not('first_contacted_at', 'is', null);
-    if (!funnelError) {
-      // Apply same date filter as CRM (first_contacted_at range) when present.
-      const withinRange = (iso: string): boolean => {
-        if (fromIso && iso < fromIso) return false;
-        if (toIso && iso > toIso) return false;
-        return true;
-      };
 
-      for (const row of (funnelLeads ?? []) as {
-        id: string;
-        first_contacted_at: string | null;
-      }[]) {
+    const firstContactedAtByLeadId = new Map<string, string>();
+    if (!funnelError) {
+      for (const row of (funnelLeads ?? []) as { id: string; first_contacted_at: string | null }[]) {
         const at = row.first_contacted_at;
-        if (!at) continue;
-        if (!withinRange(at)) continue;
-        if (!byLead.has(row.id)) byLead.set(row.id, at);
+        if (at) firstContactedAtByLeadId.set(row.id, at);
       }
+    }
+
+    const { data: historyRows, error: historyError } = await supabase
+      .from('lead_status_history')
+      .select('lead_id, changed_at')
+      .eq('to_status', 'invite_sent')
+      .order('changed_at', { ascending: true });
+    if (historyError) return;
+    const byLead = new Map<string, string>();
+    for (const row of (historyRows ?? []) as { lead_id: string; changed_at: string }[]) {
+      if (byLead.has(row.lead_id)) continue;
+      const override = firstContactedAtByLeadId.get(row.lead_id);
+      const effective = override ?? row.changed_at;
+      if (!withinRange(effective)) continue;
+      byLead.set(row.lead_id, effective);
+    }
+
+    // Fallback: include leads that are already in the funnel but are missing history.
+    // Prefer manual first_contacted_at for cohort.
+    // IMPORTANT: do NOT fallback to updated_at/created_at here — it inflates cohorts and breaks date filters.
+    for (const [leadId, at] of firstContactedAtByLeadId.entries()) {
+      if (!withinRange(at)) continue;
+      if (!byLead.has(leadId)) byLead.set(leadId, at);
     }
 
     setMap(byLead);
@@ -370,8 +371,8 @@ export function KPITrackingView() {
   });
 
   const selectedChannels = filters.channel ?? [];
-  const firstContactedFrom = (filters as unknown as { first_contacted_from?: string }).first_contacted_from;
-  const firstContactedTo = (filters as unknown as { first_contacted_to?: string }).first_contacted_to;
+  const firstContactedFrom = filters.first_contacted_from;
+  const firstContactedTo = filters.first_contacted_to;
   const channelLabel =
     selectedChannels.length === 0
       ? 'All channels'
@@ -485,6 +486,39 @@ export function KPITrackingView() {
               </>
             )}
           </div>
+          {/* First contact date filter (same as CRM) */}
+          <label className="flex items-center gap-2 text-sm text-vloom-text">
+            <span className="text-vloom-muted">First contact:</span>
+            <input
+              type="date"
+              value={firstContactedFrom ?? ''}
+              onChange={(e) => updateFilter('first_contacted_from', e.target.value || undefined)}
+              className="px-2 py-1.5 rounded-lg border border-vloom-border bg-vloom-bg text-vloom-text text-sm"
+              title="First contact from"
+            />
+            <span className="text-vloom-muted">to</span>
+            <input
+              type="date"
+              value={firstContactedTo ?? ''}
+              onChange={(e) => updateFilter('first_contacted_to', e.target.value || undefined)}
+              className="px-2 py-1.5 rounded-lg border border-vloom-border bg-vloom-bg text-vloom-text text-sm"
+              title="First contact to"
+            />
+            {(firstContactedFrom || firstContactedTo) && (
+              <button
+                type="button"
+                onClick={() => {
+                  updateFilter('first_contacted_from', undefined);
+                  updateFilter('first_contacted_to', undefined);
+                }}
+                className="p-1 rounded text-vloom-muted hover:bg-vloom-border/30 hover:text-vloom-text"
+                title="Clear first contact filter"
+                aria-label="Clear first contact filter"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </label>
           <label className="flex items-center gap-2 text-sm text-vloom-text">
             <span className="text-vloom-muted">Weeks:</span>
             <select
