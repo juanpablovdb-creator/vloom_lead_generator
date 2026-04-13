@@ -8,6 +8,26 @@ import { LINKEDIN_POST_FEEDS_CHANNEL } from '@/lib/leadChannels';
 
 const SUPABASE_NOT_CONFIGURED = 'Configure Supabase: add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env';
 
+/** YYYY-MM-DD from CRM date inputs → start of local day (inclusive range start). */
+function dateOnlyStartOfDayToISO(dateOnly: string): string {
+  const [y, m, d] = dateOnly.split('-').map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
+}
+
+/** YYYY-MM-DD from CRM date inputs → end of local day (inclusive range end). */
+function dateOnlyEndOfDayToISO(dateOnly: string): string {
+  const [y, m, d] = dateOnly.split('-').map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
+}
+
+function firstContactGteBound(raw: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? dateOnlyStartOfDayToISO(raw) : raw;
+}
+
+function firstContactLteBound(raw: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? dateOnlyEndOfDayToISO(raw) : raw;
+}
+
 /** Minimal input to create a new lead from the CRM (manual entry). */
 export interface CreateLeadInput {
   company_name?: string | null;
@@ -182,19 +202,13 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       query = query.lte('created_at', filters.date_to);
     }
 
-    // First contact date range filter (manual first_contacted_at).
-    // Include rows with NULL first_contacted_at so imports / manual leads are not dropped when a range is set
-    // (SQL comparisons with NULL are unknown, so plain gte/lte would exclude them).
-    if (filters.first_contacted_from && filters.first_contacted_to) {
-      const from = filters.first_contacted_from;
-      const to = filters.first_contacted_to;
-      query = query.or(
-        `first_contacted_at.is.null,and(first_contacted_at.gte.${from},first_contacted_at.lte.${to})`
-      );
-    } else if (filters.first_contacted_from) {
-      query = query.or(`first_contacted_at.is.null,first_contacted_at.gte.${filters.first_contacted_from}`);
-    } else if (filters.first_contacted_to) {
-      query = query.or(`first_contacted_at.is.null,first_contacted_at.lte.${filters.first_contacted_to}`);
+    // First contact date range (first_contacted_at). Strict: NULL dates are excluded so the Kanban/table
+    // only shows leads that actually fall in the selected calendar range.
+    if (filters.first_contacted_from) {
+      query = query.gte('first_contacted_at', firstContactGteBound(filters.first_contacted_from));
+    }
+    if (filters.first_contacted_to) {
+      query = query.lte('first_contacted_at', firstContactLteBound(filters.first_contacted_to));
     }
 
     // Search filter (busca en múltiples campos)

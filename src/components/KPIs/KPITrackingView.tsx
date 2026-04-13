@@ -6,7 +6,7 @@
 // Optional filter by channel to see KPIs per channel.
 
 import { useMemo, useState, useEffect, useCallback } from 'react';
-import { ChevronDown, X } from 'lucide-react';
+import { ChevronDown, Loader2, X } from 'lucide-react';
 import { useLeads } from '@/hooks/useLeads';
 import { LEAD_CHANNEL_OPTIONS } from '@/lib/leadChannels';
 import { dateOnlyToISO } from '@/lib/dateUtils';
@@ -209,6 +209,8 @@ const KPI_COHORT_STATUSES: LeadStatus[] = [
 function useFirstInviteSentByLead(params?: {
   firstContactedFrom?: string;
   firstContactedTo?: string;
+  /** Increment to refetch cohort map after bulk DB updates. */
+  refreshKey?: number;
 }): Map<string, string> | null {
   const [map, setMap] = useState<Map<string, string> | null>(null);
 
@@ -264,7 +266,7 @@ function useFirstInviteSentByLead(params?: {
     }
 
     setMap(byLead);
-  }, [params?.firstContactedFrom, params?.firstContactedTo]);
+  }, [params?.firstContactedFrom, params?.firstContactedTo, params?.refreshKey]);
 
   useEffect(() => {
     fetchHistory();
@@ -361,10 +363,18 @@ function useLeadsForKPI(
   return { leads, isLoading };
 }
 
+const KPI_BULK_UPDATE_CHUNK = 250;
+const FIRST_CONTACT_ROW_LABEL = 'First contact (Companies)';
+
 export function KPITrackingView() {
   const [numWeeks, setNumWeeks] = useState(DEFAULT_NUM_WEEKS);
   const [listPopover, setListPopover] = useState<PopoverState>(null);
   const [channelOpen, setChannelOpen] = useState(false);
+  const [kpiCohortRefreshKey, setKpiCohortRefreshKey] = useState(0);
+  const [bulkFirstContactDate, setBulkFirstContactDate] = useState('2026-04-10');
+  const [bulkFirstContactSaving, setBulkFirstContactSaving] = useState(false);
+  const [bulkFirstContactError, setBulkFirstContactError] = useState<string | null>(null);
+  const [kpiFirstContactSelectedIds, setKpiFirstContactSelectedIds] = useState<Set<string>>(new Set());
 
   const { error, filters, updateFilter } = useLeads({
     pageSize: 1,
@@ -384,6 +394,7 @@ export function KPITrackingView() {
   const firstInviteSentByLeadId = useFirstInviteSentByLead({
     firstContactedFrom,
     firstContactedTo,
+    refreshKey: kpiCohortRefreshKey,
   });
   const stagesEverReachedByLeadId = useStagesEverReachedByLead();
   const { leads: kpiLeads, isLoading } = useLeadsForKPI(
@@ -402,6 +413,10 @@ export function KPITrackingView() {
     [kpiLeads, numWeeks, firstInviteSentByLeadId, stagesEverReachedByLeadId]
   );
 
+  useEffect(() => {
+    setKpiFirstContactSelectedIds(new Set());
+  }, [listPopover]);
+
   if (error) {
     const isNotConfigured =
       error.includes('Configure Supabase') || error.includes('VITE_SUPABASE');
@@ -417,6 +432,15 @@ export function KPITrackingView() {
   }
 
   const { weeks } = snapshot;
+
+  const kpiFirstContactAllSelected =
+    listPopover?.rowLabel === FIRST_CONTACT_ROW_LABEL &&
+    listPopover.leads.length > 0 &&
+    listPopover.leads.every((l) => kpiFirstContactSelectedIds.has(l.id));
+  const kpiFirstContactSelectedCount =
+    listPopover?.rowLabel === FIRST_CONTACT_ROW_LABEL
+      ? listPopover.leads.filter((l) => kpiFirstContactSelectedIds.has(l.id)).length
+      : 0;
 
   return (
     <div className="p-4 md:p-6">
@@ -550,7 +574,10 @@ export function KPITrackingView() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="kpi-list-title"
-          onClick={() => setListPopover(null)}
+          onClick={() => {
+            setBulkFirstContactError(null);
+            setListPopover(null);
+          }}
         >
           <div
             className="bg-vloom-surface border border-vloom-border rounded-lg shadow-xl max-w-md w-full max-h-[70vh] flex flex-col"
@@ -562,22 +589,141 @@ export function KPITrackingView() {
               </h2>
               <button
                 type="button"
-                onClick={() => setListPopover(null)}
+                onClick={() => {
+                  setBulkFirstContactError(null);
+                  setListPopover(null);
+                }}
                 className="p-1 rounded text-vloom-muted hover:bg-vloom-border hover:text-vloom-text"
                 aria-label="Cerrar"
               >
                 ×
               </button>
             </div>
+            {listPopover.rowLabel === FIRST_CONTACT_ROW_LABEL && listPopover.leads.length > 0 && (
+              <div className="px-4 py-3 border-b border-vloom-border space-y-2">
+                <p className="text-xs text-vloom-muted">change first contact date</p>
+                {bulkFirstContactError && (
+                  <p className="text-xs text-red-400">{bulkFirstContactError}</p>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <CrmDateInput
+                    fieldTone="light"
+                    value={bulkFirstContactDate}
+                    onChange={(v) => setBulkFirstContactDate(v ?? '2026-04-10')}
+                    title="New first contact date for selected leads"
+                    wrapperClassName="flex-1 min-w-[10rem]"
+                    inputClassName="text-sm"
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      bulkFirstContactSaving ||
+                      !bulkFirstContactDate.trim() ||
+                      !supabase ||
+                      kpiFirstContactSelectedCount === 0
+                    }
+                    onClick={async () => {
+                      if (!supabase) return;
+                      const ids = listPopover.leads
+                        .filter((l) => kpiFirstContactSelectedIds.has(l.id))
+                        .map((l) => l.id);
+                      if (!ids.length) return;
+                      const dateOnly = bulkFirstContactDate.trim();
+                      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+                        setBulkFirstContactError('Use a valid date (YYYY-MM-DD).');
+                        return;
+                      }
+                      if (
+                        !confirm(
+                          `Set first contact date to ${dateOnly} for ${ids.length} selected lead(s)?`
+                        )
+                      ) {
+                        return;
+                      }
+                      setBulkFirstContactError(null);
+                      setBulkFirstContactSaving(true);
+                      try {
+                        const iso = dateOnlyToISO(dateOnly);
+                        for (let i = 0; i < ids.length; i += KPI_BULK_UPDATE_CHUNK) {
+                          const chunk = ids.slice(i, i + KPI_BULK_UPDATE_CHUNK);
+                          const { error: upErr } = await supabase
+                            .from('leads')
+                            .update({ first_contacted_at: iso } as never)
+                            .in('id', chunk);
+                          if (upErr) throw upErr;
+                        }
+                        setKpiCohortRefreshKey((k) => k + 1);
+                        setListPopover(null);
+                      } catch (e) {
+                        setBulkFirstContactError(
+                          e instanceof Error ? e.message : 'Update failed'
+                        );
+                      } finally {
+                        setBulkFirstContactSaving(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-vloom-accent text-white text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                  >
+                    {bulkFirstContactSaving ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+                    ) : null}
+                    Apply ({kpiFirstContactSelectedCount})
+                  </button>
+                </div>
+              </div>
+            )}
             <ul className="overflow-y-auto px-4 py-2 flex-1 text-sm text-vloom-text divide-y divide-vloom-border">
               {listPopover.leads.length === 0 ? (
                 <li className="py-2 text-vloom-muted">No companies</li>
               ) : (
-                listPopover.leads.map((lead) => (
-                  <li key={lead.id} className="py-2">
-                    {leadLabel(lead)}
-                  </li>
-                ))
+                <>
+                  {listPopover.rowLabel === FIRST_CONTACT_ROW_LABEL && (
+                    <li className="sticky top-0 z-[1] bg-vloom-surface py-2 border-b border-vloom-border -mx-4 px-4 mb-0">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-vloom-muted">
+                        <input
+                          type="checkbox"
+                          checked={kpiFirstContactAllSelected}
+                          onChange={() => {
+                            if (kpiFirstContactAllSelected) {
+                              setKpiFirstContactSelectedIds(new Set());
+                            } else {
+                              setKpiFirstContactSelectedIds(
+                                new Set(listPopover.leads.map((l) => l.id))
+                              );
+                            }
+                          }}
+                          className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent"
+                        />
+                        Select all
+                      </label>
+                    </li>
+                  )}
+                  {listPopover.leads.map((lead) => (
+                    <li key={lead.id} className="py-2 flex items-start gap-2">
+                      {listPopover.rowLabel === FIRST_CONTACT_ROW_LABEL ? (
+                        <>
+                          <input
+                            type="checkbox"
+                            checked={kpiFirstContactSelectedIds.has(lead.id)}
+                            onChange={() => {
+                              setKpiFirstContactSelectedIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(lead.id)) next.delete(lead.id);
+                                else next.add(lead.id);
+                                return next;
+                              });
+                            }}
+                            className="mt-0.5 rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent shrink-0"
+                            aria-label={`Select ${leadLabel(lead)}`}
+                          />
+                          <span className="min-w-0">{leadLabel(lead)}</span>
+                        </>
+                      ) : (
+                        leadLabel(lead)
+                      )}
+                    </li>
+                  ))}
+                </>
               )}
             </ul>
           </div>
@@ -602,7 +748,7 @@ export function KPITrackingView() {
             </thead>
             <tbody>
               <KpiRow
-                label="First contact (Companies)"
+                label={FIRST_CONTACT_ROW_LABEL}
                 cells={weeks.map((w) => w.peopleContacted)}
                 weeks={weeks}
                 leadKey="peopleContactedLeads"

@@ -6,11 +6,12 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
+- **KPIs — Bulk first contact desde el modal:** En **First contact (Companies)** el modal abre sin selección; checkboxes + **Select all** (`text-vloom-muted`), fecha y **Apply (N)**; refresca cohorte.
 - **Tema oscuro unificado (~#1a1b21):** `--background` / `--card` en `index.css` y tokens `vloom.bg` / `vloom.surface` en `tailwind.config.js` alineados al mismo carbón; bordes `border`/`input` ajustados. **`CrmDateInput` `fieldTone="dark"`** y barra **First contact** en CRM usan `bg-background`, `border-border`, `text-foreground` (no un negro aparte).
 - **CRM — Toolbar First contact:** El bloque de fechas ya no lleva `border` ni fondo aparte (`bg-transparent`) para quitar la línea/caja alrededor del grupo.
 - **CRM — Date pickers con icono Calendar visible:** `CrmDateInput`: Lucide **Calendar** + `showPicker()`; **`fieldTone="dark"`** = campo alineado al tema + esquina **blanca** calendario; **`fieldTone="light"`** = caja clara entera.
 - **CRM — Kanban carga el pipeline completo (chunks):** En vista Kanban, `useLeads` usa `fetchFullFilteredSet` y pide resultados en lotes (PostgREST suele devolver ~1000 filas por respuesta aunque `range` pida más). Así negociaciones u otras etapas no quedan fuera del array hasta que el usuario busca. Límite de seguridad 50k filas.
-- **CRM — Filtro First contact + `NULL`:** El rango `first_contacted_from/to` ahora incluye leads con `first_contacted_at` nulo (`or` con `is.null`), para que imports/referrals no desaparezcan del board si tenés fechas en el toolbar.
+- **CRM — Filtro First contact (estricto):** `first_contacted_from/to` en `useLeads` filtra solo por `first_contacted_at` dentro del rango (inicio/fin de día local en ISO); **excluye `NULL`**, para que Kanban/tablas muestren únicamente leads con esa fecha en el rango (comportamiento esperado al acotar cohorte).
 - **CRM — Kanban normaliza `status`:** `CRMKanban` hace trim + lowercase al mapear columnas por si el valor en BD no coincide exactamente con el enum.
 - **CRM / Filtros — Vista “By both” (default):** `LeadViewBy` incluye `both`; el desplegable en `FilterBar` ofrece **By both** (predeterminado, una fila por contacto), **By people** y **By companies** (agrupa la tabla por compañía). Preferencias CRM y “Clear all” vuelven a `both`. El contador de filtros activos no cuenta `both` como filtro extra.
 - **Tipos DB — `leads.Insert` incluye `score`:** Corregido `Insert` que omitía `score` por error; alinea tipos con CSV import y filas de lead.
