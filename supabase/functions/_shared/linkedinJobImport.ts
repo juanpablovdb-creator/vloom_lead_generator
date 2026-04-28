@@ -35,6 +35,14 @@ function toArray(v: unknown): string[] {
   return [];
 }
 
+export function normalizeCompanyName(raw: string): string {
+  return (raw ?? "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
 export function normalizeDomain(raw: string): string {
   try {
     const trimmed = raw.trim();
@@ -140,6 +148,28 @@ export interface LinkedInJobImportResult {
   totalFromApify: number;
 }
 
+async function loadBlockedCompanyNormalizedSet(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("blocked_companies")
+    .select("company_name_normalized")
+    .eq("user_id", userId);
+
+  if (error) {
+    console.warn("[linkedinJobImport] blocked_companies query failed:", error.message);
+    return new Set();
+  }
+
+  const rows = (data ?? []) as Array<{ company_name_normalized?: string | null }>;
+  return new Set(
+    rows
+      .map((r) => normalizeCompanyName(r.company_name_normalized ?? ""))
+      .filter((v) => v.length > 0),
+  );
+}
+
 /** Fetch dataset items from Apify (JSON array). */
 export async function fetchApifyDatasetItems(
   datasetId: string,
@@ -179,6 +209,11 @@ export async function importLinkedInJobsFromItems(options: {
       if (job.companyUrl) domains.push(normalizeDomain(job.companyUrl));
       return !domains.some((d) => normalizedExclude.has(d));
     });
+  }
+
+  const blocked = await loadBlockedCompanyNormalizedSet(supabase, userId);
+  if (blocked.size > 0) {
+    jobs = jobs.filter((job) => !blocked.has(normalizeCompanyName(job.company)));
   }
 
   const totalFromApify = jobs.length;

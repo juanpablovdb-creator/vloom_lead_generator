@@ -72,19 +72,25 @@ export const FUNNEL_STAGES_FROM_HISTORY: LeadStatus[] = [
 /** Map: lead_id -> set of to_status values that lead has ever had (from lead_status_history). */
 export type StagesEverReachedByLeadId = Map<string, Set<string>>;
 
-/** Pipeline order for "reached" fallback when history is missing (e.g. pre-trigger moves). */
-const STAGES_AT_OR_PAST: Record<string, LeadStatus[]> = {
-  connected: ['connected', 'reply', 'positive_reply', 'negotiation', 'closed', 'lost', 'disqualified'],
-  reply: ['reply', 'positive_reply', 'negotiation', 'closed', 'lost', 'disqualified'],
-  positive_reply: ['positive_reply', 'negotiation', 'closed', 'lost', 'disqualified'],
-  negotiation: ['negotiation', 'closed', 'lost', 'disqualified'],
+/**
+ * KPI stage membership based on current status.
+ *
+ * IMPORTANT: If a lead is currently `lost` or `disqualified`, it should NOT count
+ * towards "positive path" stages (reply/positive reply/negotiation/closed). It should
+ * only count in its terminal bucket.
+ */
+const KPI_STAGE_AT_OR_PAST_POSITIVE_PATH: Record<string, LeadStatus[]> = {
+  connected: ['connected', 'reply', 'positive_reply', 'negotiation', 'closed'],
+  reply: ['reply', 'positive_reply', 'negotiation', 'closed'],
+  positive_reply: ['positive_reply', 'negotiation', 'closed'],
+  negotiation: ['negotiation', 'closed'],
   closed: ['closed'],
   lost: ['lost'],
   disqualified: ['disqualified'],
 };
 
-function hasReachedStageByCurrentStatus(lead: Lead, stage: string): boolean {
-  const allowed = STAGES_AT_OR_PAST[stage];
+function isInStageForKpiByCurrentStatus(lead: Lead, stage: string): boolean {
+  const allowed = KPI_STAGE_AT_OR_PAST_POSITIVE_PATH[stage];
   return allowed ? allowed.includes(lead.status) : false;
 }
 
@@ -162,10 +168,6 @@ export function computeKPIsByWeek(
     orderedKeys.push(key);
   }
 
-  /** True if lead ever reached this stage (from history or fallback from current status). */
-  const hasEverBeenInStage = (lead: Lead, stage: string): boolean =>
-    stagesEverReachedByLeadId?.get(lead.id)?.has(stage) ?? hasReachedStageByCurrentStatus(lead, stage);
-
   const weeks: WeekKPI[] = orderedKeys.map((weekKey) => {
     const cohort = leadsByWeek.get(weekKey) ?? [];
     const monday = new Date(weekKey + 'T00:00:00');
@@ -173,13 +175,13 @@ export function computeKPIsByWeek(
     sunday.setDate(sunday.getDate() + 6);
 
     const peopleContactedLeads = cohort;
-    const connectedLeads = cohort.filter((l) => hasEverBeenInStage(l, 'connected'));
-    const repliesLeads = cohort.filter((l) => hasEverBeenInStage(l, 'reply'));
-    const positiveRepliesLeads = cohort.filter((l) => hasEverBeenInStage(l, 'positive_reply'));
-    const opportunityLeads = cohort.filter((l) => hasEverBeenInStage(l, 'negotiation'));
-    const closedLeads = cohort.filter((l) => hasEverBeenInStage(l, 'closed'));
-    const lostLeads = cohort.filter((l) => hasEverBeenInStage(l, 'lost'));
-    const disqualifiedLeads = cohort.filter((l) => hasEverBeenInStage(l, 'disqualified'));
+    const connectedLeads = cohort.filter((l) => isInStageForKpiByCurrentStatus(l, 'connected'));
+    const repliesLeads = cohort.filter((l) => isInStageForKpiByCurrentStatus(l, 'reply'));
+    const positiveRepliesLeads = cohort.filter((l) => isInStageForKpiByCurrentStatus(l, 'positive_reply'));
+    const opportunityLeads = cohort.filter((l) => isInStageForKpiByCurrentStatus(l, 'negotiation'));
+    const closedLeads = cohort.filter((l) => isInStageForKpiByCurrentStatus(l, 'closed'));
+    const lostLeads = cohort.filter((l) => isInStageForKpiByCurrentStatus(l, 'lost'));
+    const disqualifiedLeads = cohort.filter((l) => isInStageForKpiByCurrentStatus(l, 'disqualified'));
 
     const weekLabel = `${formatShort(monday)} – ${formatShort(sunday)}`;
 

@@ -39,6 +39,8 @@ const LEAD_STATUS_OPTIONS: LeadStatus[] = [
   'disqualified',
 ];
 
+const ASSIGNEE_OPTIONS = ['Aron D\'mello', 'Andres Leal', 'Juan Pablo Val'] as const;
+
 function formatDate(s: string | null): string {
   return s ? new Date(s).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '—';
 }
@@ -246,18 +248,27 @@ export function LeadCardPopup({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Assignee</div>
-          <input
-            type="text"
-            value={localLead.assignee ?? ''}
-            onChange={(e) => setLocalLead({ ...localLead, assignee: e.target.value })}
-            onBlur={async () => {
-              const v = (localLead.assignee ?? '').trim() || null;
-              await onUpdateLead(localLead.id, { assignee: v });
+          <select
+            value={
+              (localLead.assignee ?? '').trim() &&
+              !ASSIGNEE_OPTIONS.includes((localLead.assignee ?? '').trim() as (typeof ASSIGNEE_OPTIONS)[number])
+                ? ''
+                : (localLead.assignee ?? '').trim()
+            }
+            onChange={async (e) => {
+              const v = e.target.value.trim() || null;
               setLocalLead((prev) => ({ ...prev, assignee: v }));
+              await onUpdateLead(localLead.id, { assignee: v });
             }}
-            placeholder="e.g. Andres Leal"
             className="w-full max-w-xs rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
-          />
+          >
+            <option value="">Unassigned</option>
+            {ASSIGNEE_OPTIONS.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Website</div>

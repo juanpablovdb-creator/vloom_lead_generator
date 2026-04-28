@@ -55,9 +55,10 @@ interface KpiCellProps {
   rowLabel: string;
   weekLabel: string;
   onOpenList: (state: PopoverState) => void;
+  tdClassName?: string;
 }
 
-function KpiCell({ cell, leads, rowLabel, weekLabel, onOpenList }: KpiCellProps) {
+function KpiCell({ cell, leads, rowLabel, weekLabel, onOpenList, tdClassName }: KpiCellProps) {
   const content =
     typeof cell === 'number' ? (
       <span>{formatTwoDecimals(cell)}</span>
@@ -81,7 +82,11 @@ function KpiCell({ cell, leads, rowLabel, weekLabel, onOpenList }: KpiCellProps)
     })();
 
   return (
-    <td className="px-4 py-2.5 text-center text-sm text-vloom-text border-b border-vloom-border tabular-nums align-top min-w-[7rem]">
+    <td
+      className={`px-4 py-2.5 text-center text-sm text-vloom-text border-b border-vloom-border tabular-nums align-top min-w-[7rem] ${
+        tdClassName ?? ''
+      }`}
+    >
       <button
         type="button"
         onClick={() => leads.length > 0 && onOpenList({ rowLabel, weekLabel, leads })}
@@ -113,11 +118,19 @@ interface RowProps {
     | 'lostLeads'
     | 'disqualifiedLeads'
   >;
+  summary?: {
+    totalCell: string | number;
+    avgPerWeekCell: string | number;
+    /** Leads shown when clicking any of the summary cells. */
+    leads: Lead[];
+    /** Label for the summary popover. */
+    weekLabel: string;
+  };
   highlight?: 'positive' | 'negative' | 'neutral';
   onOpenList: (state: PopoverState) => void;
 }
 
-function KpiRow({ label, cells, weeks, leadKey, highlight, onOpenList }: RowProps) {
+function KpiRow({ label, cells, weeks, leadKey, summary, highlight, onOpenList }: RowProps) {
   const rowBg =
     highlight === 'positive'
       ? 'bg-emerald-500/10'
@@ -142,6 +155,26 @@ function KpiRow({ label, cells, weeks, leadKey, highlight, onOpenList }: RowProp
           onOpenList={onOpenList}
         />
       ))}
+      {summary && (
+        <>
+          <KpiCell
+            cell={summary.totalCell}
+            leads={summary.leads}
+            rowLabel={label}
+            weekLabel={summary.weekLabel}
+            onOpenList={onOpenList}
+            tdClassName="bg-vloom-accent/5 border-l border-vloom-border"
+          />
+          <KpiCell
+            cell={summary.avgPerWeekCell}
+            leads={summary.leads}
+            rowLabel={label}
+            weekLabel={summary.weekLabel}
+            onOpenList={onOpenList}
+            tdClassName="bg-vloom-accent/5"
+          />
+        </>
+      )}
     </tr>
   );
 }
@@ -151,6 +184,12 @@ interface CustomLeadsRowProps {
   cells: (string | number)[];
   weeks: WeekKPI[];
   leadsByWeek: Lead[][];
+  summary?: {
+    totalCell: string | number;
+    avgPerWeekCell: string | number;
+    leads: Lead[];
+    weekLabel: string;
+  };
   highlight?: 'positive' | 'negative' | 'neutral';
   onOpenList: (state: PopoverState) => void;
 }
@@ -160,6 +199,7 @@ function KpiRowCustomLeads({
   cells,
   weeks,
   leadsByWeek,
+  summary,
   highlight,
   onOpenList,
 }: CustomLeadsRowProps) {
@@ -187,6 +227,26 @@ function KpiRowCustomLeads({
           onOpenList={onOpenList}
         />
       ))}
+      {summary && (
+        <>
+          <KpiCell
+            cell={summary.totalCell}
+            leads={summary.leads}
+            rowLabel={label}
+            weekLabel={summary.weekLabel}
+            onOpenList={onOpenList}
+            tdClassName="bg-vloom-accent/5 border-l border-vloom-border"
+          />
+          <KpiCell
+            cell={summary.avgPerWeekCell}
+            leads={summary.leads}
+            rowLabel={label}
+            weekLabel={summary.weekLabel}
+            onOpenList={onOpenList}
+            tdClassName="bg-vloom-accent/5"
+          />
+        </>
+      )}
     </tr>
   );
 }
@@ -219,68 +279,74 @@ function useFirstInviteSentByLead(params?: {
 }): Map<string, string> | null {
   const [map, setMap] = useState<Map<string, string> | null>(null);
 
-  const fetchHistory = useCallback(async () => {
-    if (!supabase) return;
+  useEffect(() => {
+    let cancelled = false;
 
-    // Same calendar-day bounds as CRM `useLeads` (start/end of local day), not noon — avoids KPI/CRM mismatch.
-    const fromIso = params?.firstContactedFrom
-      ? firstContactFilterGteBound(params.firstContactedFrom)
-      : undefined;
-    const toIso = params?.firstContactedTo
-      ? firstContactFilterLteBound(params.firstContactedTo)
-      : undefined;
+    const run = async () => {
+      if (!supabase) return;
 
-    const withinRange = (iso: string): boolean => {
-      if (fromIso && iso < fromIso) return false;
-      if (toIso && iso > toIso) return false;
-      return true;
+      // Same calendar-day bounds as CRM `useLeads` (start/end of local day), not noon — avoids KPI/CRM mismatch.
+      const fromIso = params?.firstContactedFrom
+        ? firstContactFilterGteBound(params.firstContactedFrom)
+        : undefined;
+      const toIso = params?.firstContactedTo
+        ? firstContactFilterLteBound(params.firstContactedTo)
+        : undefined;
+
+      const withinRange = (iso: string): boolean => {
+        if (fromIso && iso < fromIso) return false;
+        if (toIso && iso > toIso) return false;
+        return true;
+      };
+
+      const { data: funnelLeads, error: funnelError } = await supabase
+        .from('leads')
+        .select('id, first_contacted_at')
+        .eq('is_marked_as_lead', true)
+        .neq('status', 'disqualified')
+        .in('status', KPI_COHORT_STATUSES)
+        .not('first_contacted_at', 'is', null);
+
+      const firstContactedAtByLeadId = new Map<string, string>();
+      if (!funnelError) {
+        for (const row of (funnelLeads ?? []) as { id: string; first_contacted_at: string | null }[]) {
+          const at = row.first_contacted_at;
+          if (at) firstContactedAtByLeadId.set(row.id, at);
+        }
+      }
+
+      const { data: historyRows, error: historyError } = await supabase
+        .from('lead_status_history')
+        .select('lead_id, changed_at')
+        .eq('to_status', 'invite_sent')
+        .order('changed_at', { ascending: true });
+      if (historyError) return;
+
+      const byLead = new Map<string, string>();
+      for (const row of (historyRows ?? []) as { lead_id: string; changed_at: string }[]) {
+        if (byLead.has(row.lead_id)) continue;
+        const override = firstContactedAtByLeadId.get(row.lead_id);
+        const effective = override ?? row.changed_at;
+        if (!withinRange(effective)) continue;
+        byLead.set(row.lead_id, effective);
+      }
+
+      // Fallback: include leads that are already in the funnel but are missing history.
+      // Prefer manual first_contacted_at for cohort.
+      // IMPORTANT: do NOT fallback to updated_at/created_at here — it inflates cohorts and breaks date filters.
+      for (const [leadId, at] of firstContactedAtByLeadId.entries()) {
+        if (!withinRange(at)) continue;
+        if (!byLead.has(leadId)) byLead.set(leadId, at);
+      }
+
+      if (!cancelled) setMap(byLead);
     };
 
-    const { data: funnelLeads, error: funnelError } = await supabase
-      .from('leads')
-      .select('id, first_contacted_at')
-      .eq('is_marked_as_lead', true)
-      .neq('status', 'disqualified')
-      .in('status', KPI_COHORT_STATUSES)
-      .not('first_contacted_at', 'is', null);
-
-    const firstContactedAtByLeadId = new Map<string, string>();
-    if (!funnelError) {
-      for (const row of (funnelLeads ?? []) as { id: string; first_contacted_at: string | null }[]) {
-        const at = row.first_contacted_at;
-        if (at) firstContactedAtByLeadId.set(row.id, at);
-      }
-    }
-
-    const { data: historyRows, error: historyError } = await supabase
-      .from('lead_status_history')
-      .select('lead_id, changed_at')
-      .eq('to_status', 'invite_sent')
-      .order('changed_at', { ascending: true });
-    if (historyError) return;
-    const byLead = new Map<string, string>();
-    for (const row of (historyRows ?? []) as { lead_id: string; changed_at: string }[]) {
-      if (byLead.has(row.lead_id)) continue;
-      const override = firstContactedAtByLeadId.get(row.lead_id);
-      const effective = override ?? row.changed_at;
-      if (!withinRange(effective)) continue;
-      byLead.set(row.lead_id, effective);
-    }
-
-    // Fallback: include leads that are already in the funnel but are missing history.
-    // Prefer manual first_contacted_at for cohort.
-    // IMPORTANT: do NOT fallback to updated_at/created_at here — it inflates cohorts and breaks date filters.
-    for (const [leadId, at] of firstContactedAtByLeadId.entries()) {
-      if (!withinRange(at)) continue;
-      if (!byLead.has(leadId)) byLead.set(leadId, at);
-    }
-
-    setMap(byLead);
+    run();
+    return () => {
+      cancelled = true;
+    };
   }, [params?.firstContactedFrom, params?.firstContactedTo, params?.refreshKey]);
-
-  useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory]);
 
   return map;
 }
@@ -427,6 +493,118 @@ export function KPITrackingView() {
     setKpiFirstContactSelectedIds(new Set());
   }, [listPopover]);
 
+  const { weeks } = snapshot;
+
+  const summaryWeeks = useMemo(() => {
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const includesToday = (w: WeekKPI): boolean => {
+      const monday = new Date(w.monday).getTime();
+      const sunday = new Date(w.sunday).getTime();
+      return Number.isFinite(monday) && Number.isFinite(sunday) && todayStart >= monday && todayStart <= sunday;
+    };
+    // If the selected range includes the current (in-progress) week, exclude it from summary columns.
+    if (weeks.length > 0 && includesToday(weeks[weeks.length - 1])) {
+      return weeks.slice(0, -1);
+    }
+    return weeks;
+  }, [weeks]);
+
+  const summaryWeekLabel = useMemo(() => {
+    if (!summaryWeeks.length) return `${numWeeks} weeks (summary)`;
+    const first = summaryWeeks[0];
+    const last = summaryWeeks[summaryWeeks.length - 1];
+    return `${formatWeekRange(first.monday, first.sunday)} → ${formatWeekRange(last.monday, last.sunday)} (total)`;
+  }, [summaryWeeks, numWeeks]);
+
+  const numWeeksShown = summaryWeeks.length || numWeeks;
+
+  const peopleContactedTotal = useMemo(
+    () => summaryWeeks.reduce((acc, w) => acc + (w.peopleContacted ?? 0), 0),
+    [summaryWeeks]
+  );
+  const peopleContactedTotalAllWeeksForWeeklyPct = useMemo(
+    () => weeks.reduce((acc, w) => acc + (w.peopleContacted ?? 0), 0),
+    [weeks]
+  );
+  const connectedTotal = useMemo(
+    () => summaryWeeks.reduce((acc, w) => acc + (w.connected ?? 0), 0),
+    [summaryWeeks]
+  );
+  const repliesTotal = useMemo(
+    () => summaryWeeks.reduce((acc, w) => acc + (w.replies ?? 0), 0),
+    [summaryWeeks]
+  );
+  const positiveRepliesTotal = useMemo(
+    () => summaryWeeks.reduce((acc, w) => acc + (w.positiveReplies ?? 0), 0),
+    [summaryWeeks]
+  );
+  const opportunityTotal = useMemo(
+    () => summaryWeeks.reduce((acc, w) => acc + (w.opportunity ?? 0), 0),
+    [summaryWeeks]
+  );
+  const closedTotal = useMemo(
+    () => summaryWeeks.reduce((acc, w) => acc + (w.closed ?? 0), 0),
+    [summaryWeeks]
+  );
+  const lostTotal = useMemo(
+    () => summaryWeeks.reduce((acc, w) => acc + (w.lost ?? 0), 0),
+    [summaryWeeks]
+  );
+  const disqualifiedTotal = useMemo(
+    () => summaryWeeks.reduce((acc, w) => acc + (w.disqualified ?? 0), 0),
+    [summaryWeeks]
+  );
+
+  const peopleContactedLeadsAll = useMemo(
+    () => summaryWeeks.flatMap((w) => w.peopleContactedLeads ?? []),
+    [summaryWeeks]
+  );
+  const connectedLeadsAll = useMemo(
+    () => summaryWeeks.flatMap((w) => w.connectedLeads ?? []),
+    [summaryWeeks]
+  );
+  const repliesLeadsAll = useMemo(
+    () => summaryWeeks.flatMap((w) => w.repliesLeads ?? []),
+    [summaryWeeks]
+  );
+  const positiveRepliesLeadsAll = useMemo(
+    () => summaryWeeks.flatMap((w) => w.positiveRepliesLeads ?? []),
+    [summaryWeeks]
+  );
+  const opportunityLeadsAll = useMemo(
+    () => summaryWeeks.flatMap((w) => w.opportunityLeads ?? []),
+    [summaryWeeks]
+  );
+  const closedLeadsAll = useMemo(
+    () => summaryWeeks.flatMap((w) => w.closedLeads ?? []),
+    [summaryWeeks]
+  );
+  const lostLeadsAll = useMemo(
+    () => summaryWeeks.flatMap((w) => w.lostLeads ?? []),
+    [summaryWeeks]
+  );
+  const disqualifiedLeadsAll = useMemo(
+    () => summaryWeeks.flatMap((w) => w.disqualifiedLeads ?? []),
+    [summaryWeeks]
+  );
+
+  const videoSentLeadsByWeek = useMemo(
+    () =>
+      summaryWeeks.map((w) =>
+        w.peopleContactedLeads.filter((l) => (l.tags ?? []).includes('video_sent'))
+      ),
+    [summaryWeeks]
+  );
+  const videoSentTotal = useMemo(
+    () => videoSentLeadsByWeek.reduce((acc, arr) => acc + arr.length, 0),
+    [videoSentLeadsByWeek]
+  );
+  const videoSentLeadsAll = useMemo(
+    () => videoSentLeadsByWeek.flat(),
+    [videoSentLeadsByWeek]
+  );
+
   if (error) {
     const isNotConfigured =
       error.includes('Configure Supabase') || error.includes('VITE_SUPABASE');
@@ -440,8 +618,6 @@ export function KPITrackingView() {
       </div>
     );
   }
-
-  const { weeks } = snapshot;
 
   const kpiFirstContactAllSelected =
     listPopover?.rowLabel === FIRST_CONTACT_ROW_LABEL &&
@@ -754,14 +930,26 @@ export function KPITrackingView() {
                 {weeks.map((w) => (
                   <WeekColumnHeader key={w.weekKey} week={w} />
                 ))}
+                <th className="px-4 py-2.5 text-center text-xs font-medium text-vloom-muted uppercase tracking-wider border-b border-vloom-border whitespace-nowrap min-w-[7rem] bg-vloom-accent/5 border-l border-vloom-border">
+                  Total
+                </th>
+                <th className="px-4 py-2.5 text-center text-xs font-medium text-vloom-muted uppercase tracking-wider border-b border-vloom-border whitespace-nowrap min-w-[7rem] bg-vloom-accent/5">
+                  Avg/wk
+                </th>
               </tr>
             </thead>
             <tbody>
               <KpiRow
                 label={FIRST_CONTACT_ROW_LABEL}
-                cells={weeks.map((w) => w.peopleContacted)}
+                cells={weeks.map((w) => countWithRate(w.peopleContacted, peopleContactedTotalAllWeeksForWeeklyPct))}
                 weeks={weeks}
                 leadKey="peopleContactedLeads"
+                summary={{
+                  totalCell: peopleContactedTotal,
+                  avgPerWeekCell: numWeeksShown > 0 ? peopleContactedTotal / numWeeksShown : 0,
+                  leads: peopleContactedLeadsAll,
+                  weekLabel: summaryWeekLabel,
+                }}
                 onOpenList={setListPopover}
               />
               <KpiRow
@@ -771,6 +959,15 @@ export function KPITrackingView() {
                 )}
                 weeks={weeks}
                 leadKey="connectedLeads"
+                summary={{
+                  totalCell: countWithRate(connectedTotal, peopleContactedTotal),
+                  avgPerWeekCell:
+                    numWeeksShown > 0
+                      ? countWithRate(connectedTotal / numWeeksShown, peopleContactedTotal / numWeeksShown)
+                      : countWithRate(0, 0),
+                  leads: connectedLeadsAll,
+                  weekLabel: summaryWeekLabel,
+                }}
                 onOpenList={setListPopover}
               />
               <KpiRowCustomLeads
@@ -782,9 +979,16 @@ export function KPITrackingView() {
                   )
                 )}
                 weeks={weeks}
-                leadsByWeek={weeks.map((w) =>
-                  w.peopleContactedLeads.filter((l) => (l.tags ?? []).includes('video_sent'))
-                )}
+                leadsByWeek={videoSentLeadsByWeek}
+                summary={{
+                  totalCell: countWithRate(videoSentTotal, peopleContactedTotal),
+                  avgPerWeekCell:
+                    numWeeksShown > 0
+                      ? countWithRate(videoSentTotal / numWeeksShown, peopleContactedTotal / numWeeksShown)
+                      : countWithRate(0, 0),
+                  leads: videoSentLeadsAll,
+                  weekLabel: summaryWeekLabel,
+                }}
                 onOpenList={setListPopover}
               />
               <KpiRow
@@ -794,6 +998,15 @@ export function KPITrackingView() {
                 )}
                 weeks={weeks}
                 leadKey="repliesLeads"
+                summary={{
+                  totalCell: countWithRate(repliesTotal, peopleContactedTotal),
+                  avgPerWeekCell:
+                    numWeeksShown > 0
+                      ? countWithRate(repliesTotal / numWeeksShown, peopleContactedTotal / numWeeksShown)
+                      : countWithRate(0, 0),
+                  leads: repliesLeadsAll,
+                  weekLabel: summaryWeekLabel,
+                }}
                 onOpenList={setListPopover}
               />
               <KpiRow
@@ -804,6 +1017,15 @@ export function KPITrackingView() {
                 weeks={weeks}
                 leadKey="positiveRepliesLeads"
                 highlight="positive"
+                summary={{
+                  totalCell: countWithRate(positiveRepliesTotal, peopleContactedTotal),
+                  avgPerWeekCell:
+                    numWeeksShown > 0
+                      ? countWithRate(positiveRepliesTotal / numWeeksShown, peopleContactedTotal / numWeeksShown)
+                      : countWithRate(0, 0),
+                  leads: positiveRepliesLeadsAll,
+                  weekLabel: summaryWeekLabel,
+                }}
                 onOpenList={setListPopover}
               />
               <KpiRow
@@ -814,6 +1036,15 @@ export function KPITrackingView() {
                 weeks={weeks}
                 leadKey="opportunityLeads"
                 highlight="positive"
+                summary={{
+                  totalCell: countWithRate(opportunityTotal, peopleContactedTotal),
+                  avgPerWeekCell:
+                    numWeeksShown > 0
+                      ? countWithRate(opportunityTotal / numWeeksShown, peopleContactedTotal / numWeeksShown)
+                      : countWithRate(0, 0),
+                  leads: opportunityLeadsAll,
+                  weekLabel: summaryWeekLabel,
+                }}
                 onOpenList={setListPopover}
               />
               <KpiRow
@@ -824,6 +1055,15 @@ export function KPITrackingView() {
                 weeks={weeks}
                 leadKey="closedLeads"
                 highlight="positive"
+                summary={{
+                  totalCell: countWithRate(closedTotal, peopleContactedTotal),
+                  avgPerWeekCell:
+                    numWeeksShown > 0
+                      ? countWithRate(closedTotal / numWeeksShown, peopleContactedTotal / numWeeksShown)
+                      : countWithRate(0, 0),
+                  leads: closedLeadsAll,
+                  weekLabel: summaryWeekLabel,
+                }}
                 onOpenList={setListPopover}
               />
               <KpiRow
@@ -834,6 +1074,15 @@ export function KPITrackingView() {
                 weeks={weeks}
                 leadKey="lostLeads"
                 highlight="negative"
+                summary={{
+                  totalCell: countWithRate(lostTotal, peopleContactedTotal),
+                  avgPerWeekCell:
+                    numWeeksShown > 0
+                      ? countWithRate(lostTotal / numWeeksShown, peopleContactedTotal / numWeeksShown)
+                      : countWithRate(0, 0),
+                  leads: lostLeadsAll,
+                  weekLabel: summaryWeekLabel,
+                }}
                 onOpenList={setListPopover}
               />
               <KpiRow
@@ -843,6 +1092,15 @@ export function KPITrackingView() {
                 )}
                 weeks={weeks}
                 leadKey="disqualifiedLeads"
+                summary={{
+                  totalCell: countWithRate(disqualifiedTotal, peopleContactedTotal),
+                  avgPerWeekCell:
+                    numWeeksShown > 0
+                      ? countWithRate(disqualifiedTotal / numWeeksShown, peopleContactedTotal / numWeeksShown)
+                      : countWithRate(0, 0),
+                  leads: disqualifiedLeadsAll,
+                  weekLabel: summaryWeekLabel,
+                }}
                 onOpenList={setListPopover}
               />
             </tbody>

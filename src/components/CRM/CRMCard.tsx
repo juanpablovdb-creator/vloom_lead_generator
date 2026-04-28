@@ -2,13 +2,15 @@
 // Leadflow Vloom - CRM card (Kanban)
 // =====================================================
 import type { Lead } from '@/types/database';
-import { ExternalLink, MapPin, Briefcase, User, CheckCircle2, Circle } from 'lucide-react';
+import { ExternalLink, MapPin, Briefcase, User, CheckCircle2, Circle, CheckSquare, Square } from 'lucide-react';
 
 interface CRMCardProps {
   lead: Lead;
   onDragStart: (e: React.DragEvent, lead: Lead) => void;
   onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
   onOpen?: (lead: Lead) => void;
+  isSelected?: boolean;
+  onToggleSelected?: () => void;
 }
 
 /** When `company_name` is empty, LinkedIn headlines often contain "Role at Company". */
@@ -47,7 +49,7 @@ function logoUrlForLead(lead: Lead): string | null {
   return `https://logo.clearbit.com/${host}`;
 }
 
-export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProps) {
+export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen, isSelected = false, onToggleSelected }: CRMCardProps) {
   const companyStr = lead.company_name?.trim() || '';
   const contactStr = lead.contact_name?.trim() || '';
   const jobStr = lead.job_title?.trim() || '';
@@ -83,12 +85,33 @@ export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen }: CRMCardProp
       onClick={() => {
         if (onOpen) onOpen(lead);
       }}
-      className="bg-card border border-border rounded-lg p-4 cursor-pointer hover:border-primary/40 transition-colors space-y-2"
+      className={`bg-card border rounded-lg p-4 cursor-pointer transition-colors space-y-2 ${
+        isSelected ? 'border-primary/70 ring-1 ring-primary/30' : 'border-border hover:border-primary/40'
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h3 className="font-semibold text-foreground text-sm truncate">{primaryTitle}</h3>
-          {subLine && <p className="text-muted-foreground text-xs truncate">{subLine}</p>}
+        <div className="flex items-start gap-2 min-w-0 flex-1">
+          {onToggleSelected && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleSelected();
+              }}
+              className={`mt-0.5 p-0.5 rounded border ${
+                isSelected
+                  ? 'border-primary/50 bg-primary/10 text-primary'
+                  : 'border-border bg-background/30 text-muted-foreground hover:text-foreground'
+              }`}
+              title={isSelected ? 'Unselect' : 'Select'}
+            >
+              {isSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+            </button>
+          )}
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold text-foreground text-sm truncate">{primaryTitle}</h3>
+            {subLine && <p className="text-muted-foreground text-xs truncate">{subLine}</p>}
+          </div>
         </div>
         <div className="flex-shrink-0">
           {logoUrl ? (

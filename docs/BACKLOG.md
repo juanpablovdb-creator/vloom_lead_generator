@@ -41,7 +41,10 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Documentar Sprint/Wave
 - [x] Pre-mortems iniciales
 - [x] Proceso diario (PROCESS.md)
+- [x] Backend: bloquear compañías para que no entren a `leads` (tabla `blocked_companies` + enforcement en imports + endpoint de gestión)
+- [x] Backend: limpiar cards existentes en Backlog por compañía (Edge Function `cleanup-blocked-companies`)
 - [x] KPIs: fila "Video Sent" por cohorte debajo de Connected (y cohorte sin fallback `updated_at`)
+- [x] KPIs: promedios/total a la derecha (Total / Avg per week / Avg per day) para el timeframe seleccionado
 - [x] CRM: fix búsqueda (coma/% rompe PostgREST `or()` → "failed to parse logic tree")
 - [x] CRM: canales sin duplicados + abrir sin filtros + sort por “Last contacted” por defecto
 - [ ] Revisar y ejecutar migraciones Supabase

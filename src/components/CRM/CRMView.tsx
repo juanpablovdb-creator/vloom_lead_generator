@@ -19,6 +19,7 @@ import { CrmDateInput } from './CrmDateInput';
 import { lastFridayDateOnly } from '@/lib/dateUtils';
 
 const CHANNEL_OPTIONS = LEAD_CHANNEL_OPTIONS;
+const ASSIGNEE_OPTIONS = ['Aron D\'mello', 'Andres Leal', 'Juan Pablo Val'] as const;
 
 /** Parse YYYY-MM-DD (date input) as local noon → ISO for DB (avoids UTC shift). */
 function dateOnlyToISO(dateOnly: string): string {
@@ -203,13 +204,18 @@ function AddLeadModal({ onClose, onCreate, onCreated }: AddLeadModalProps) {
           </div>
           <div>
             <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Assignee (optional)</label>
-            <input
-              type="text"
+            <select
               value={assignee}
               onChange={(e) => setAssignee(e.target.value)}
-              placeholder="e.g. Andres Leal"
               className="w-full px-3 py-2 border border-vloom-border rounded-lg text-sm text-vloom-text bg-vloom-bg focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent"
-            />
+            >
+              <option value="">Unassigned</option>
+              {ASSIGNEE_OPTIONS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Channel</label>
@@ -324,6 +330,8 @@ export function CRMView() {
   const [csvBatchUpdateError, setCsvBatchUpdateError] = useState<string | null>(null);
   const { tasks, updateTaskStatus, updateTaskTitle, deleteTask, createTask, refreshTasks } = useTasks();
   const [bulkFirstContactDate, setBulkFirstContactDate] = useState('');
+  const [bulkStatus, setBulkStatus] = useState<LeadStatus>('disqualified');
+  const [bulkAssignee, setBulkAssignee] = useState('');
 
   const [csvBatchFirstContactDate, setCsvBatchFirstContactDate] = useState<string>(() => lastFridayDateOnly());
 
@@ -963,6 +971,79 @@ export function CRMView() {
             <div className="mb-3 bg-card rounded-xl border border-border p-3 flex flex-wrap items-center gap-3">
               <div className="text-xs text-muted-foreground">Bulk edit ({selectedIds.size} selected)</div>
               <label className="flex items-center gap-2 text-xs text-foreground">
+                <span className="text-muted-foreground">Status:</span>
+                <select
+                  value={bulkStatus}
+                  onChange={(e) => setBulkStatus(e.target.value as LeadStatus)}
+                  className="px-2 py-1.5 rounded-lg border border-border bg-secondary text-foreground text-xs"
+                >
+                  <option value="backlog">Backlog</option>
+                  <option value="not_contacted">Not contacted</option>
+                  <option value="invite_sent">First contact</option>
+                  <option value="connected">Connected</option>
+                  <option value="reply">Reply</option>
+                  <option value="positive_reply">Positive reply</option>
+                  <option value="negotiation">Negotiation</option>
+                  <option value="closed">Closed</option>
+                  <option value="lost">Lost</option>
+                  <option value="disqualified">Disqualified</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={!supabase}
+                onClick={async () => {
+                  if (!supabase) return;
+                  const ids = Array.from(selectedIds);
+                  if (!ids.length) return;
+                  const { error: bulkErr } = await supabase
+                    .from('leads')
+                    .update({ status: bulkStatus } as never)
+                    .in('id', ids);
+                  if (bulkErr) throw bulkErr;
+                  await refreshLeads();
+                  clearSelection();
+                }}
+                className="px-3 py-2 rounded-lg border border-border bg-secondary text-foreground text-xs font-medium hover:bg-secondary/70 disabled:opacity-50"
+              >
+                Move
+              </button>
+              <label className="flex items-center gap-2 text-xs text-foreground">
+                <span className="text-muted-foreground">Assignee:</span>
+                <select
+                  value={bulkAssignee}
+                  onChange={(e) => setBulkAssignee(e.target.value)}
+                  className="px-2 py-1.5 rounded-lg border border-border bg-secondary text-foreground text-xs"
+                >
+                  <option value="">Unassigned</option>
+                  {ASSIGNEE_OPTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={!supabase}
+                onClick={async () => {
+                  if (!supabase) return;
+                  const ids = Array.from(selectedIds);
+                  if (!ids.length) return;
+                  const v = bulkAssignee.trim() || null;
+                  const { error: bulkErr } = await supabase
+                    .from('leads')
+                    .update({ assignee: v } as never)
+                    .in('id', ids);
+                  if (bulkErr) throw bulkErr;
+                  await refreshLeads();
+                  setBulkAssignee('');
+                }}
+                className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50"
+              >
+                Apply assignee
+              </button>
+              <label className="flex items-center gap-2 text-xs text-foreground">
                 <span className="text-muted-foreground">First contact:</span>
                 <input
                   type="date"
@@ -990,6 +1071,13 @@ export function CRMView() {
                 className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50"
               >
                 Apply
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="ml-auto px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/40"
+              >
+                Clear selection
               </button>
             </div>
           )}
@@ -1037,6 +1125,8 @@ export function CRMView() {
           onStatusChange={updateLeadStatus}
           onUpdateLead={(id, updates) => updateLead(id, updates)}
           onOpenLead={(lead) => setSelectedLead(lead)}
+          selectedIds={selectedIds}
+          onToggleSelection={toggleSelection}
         />
       ) : (
         <LeadsTable

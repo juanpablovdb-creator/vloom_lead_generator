@@ -51,6 +51,8 @@ interface CRMKanbanProps {
   onStatusChange: (leadId: string, status: LeadStatus) => Promise<void>;
   onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
   onOpenLead?: (lead: Lead) => void;
+  selectedIds?: Set<string>;
+  onToggleSelection?: (leadId: string) => void;
 }
 
 export function CRMKanban({
@@ -59,6 +61,8 @@ export function CRMKanban({
   onStatusChange,
   onUpdateLead,
   onOpenLead,
+  selectedIds,
+  onToggleSelection,
 }: CRMKanbanProps) {
   const [, setDraggedLead] = useState<Lead | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<LeadStatus | null>(null);
@@ -154,6 +158,8 @@ export function CRMKanban({
                 onDragStart={handleDragStart}
                 onUpdateLead={onUpdateLead}
                 onOpen={onOpenLead}
+                isSelected={selectedIds?.has(lead.id) ?? false}
+                onToggleSelected={onToggleSelection ? () => onToggleSelection(lead.id) : undefined}
               />
             ))}
           </div>
