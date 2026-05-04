@@ -21,6 +21,8 @@ import {
   GripVertical,
 } from 'lucide-react';
 import type { Lead, LeadStatus, LeadSort, TableColumn } from '@/types/database';
+import { useMergedBlockedCompanyNormalizedSet } from '@/hooks/useMergedBlockedCompanyNormalizedSet';
+import { isLeadCompanyBlockedByNormalizedSet } from '@/lib/blockedCompanies';
 
 interface LeadsTableProps {
   leads: Lead[];
@@ -395,6 +397,7 @@ export function LeadsTable({
   selectionAction,
   highlightScrapingJobId = null,
 }: LeadsTableProps) {
+  const blockedCompanies = useMergedBlockedCompanyNormalizedSet();
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [expandedRowLeadId, setExpandedRowLeadId] = useState<string | null>(null);
@@ -517,20 +520,36 @@ export function LeadsTable({
           Boolean(highlightScrapingJobId) &&
           lead.scraping_job_id != null &&
           lead.scraping_job_id === highlightScrapingJobId;
+        const isBlocked = isLeadCompanyBlockedByNormalizedSet(lead, blockedCompanies);
         return (
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-vloom-border/50 flex items-center justify-center text-xs font-medium text-vloom-muted">
               {initial}
             </div>
             <div className="min-w-0">
-              <div className="font-medium text-vloom-text truncate max-w-[260px] flex items-center gap-2 flex-wrap">
-                <span className="truncate">{nameWithCount}</span>
+              <div className="font-medium truncate max-w-[260px] flex items-center gap-2 flex-wrap">
+                <span
+                  className={`truncate ${
+                    isBlocked ? 'text-red-400 line-through underline decoration-red-400' : 'text-vloom-text'
+                  }`}
+                  title={isBlocked ? 'Blocked company (will not be sent to Leads)' : undefined}
+                >
+                  {nameWithCount}
+                </span>
                 {showNew && (
                   <span
                     className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-vloom-accent/15 text-vloom-accent border border-vloom-accent/35"
                     title="Imported on the last Run for this saved search"
                   >
                     New
+                  </span>
+                )}
+                {isBlocked && (
+                  <span
+                    className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/30"
+                    title="Blocked company"
+                  >
+                    Blocked
                   </span>
                 )}
               </div>

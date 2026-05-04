@@ -142,17 +142,21 @@ function SavedSearchResultsTable({
     setSendMessage(null);
     setSending(true);
     try {
-      const { sent, enriched, personaCompaniesProcessed, personaLeadsCreated, enrichmentWarning } =
+      const { sent, skippedBlocked, enriched, personaCompaniesProcessed, personaLeadsCreated, enrichmentWarning } =
         await sendSelectedToLeadsAndEnrich(ids);
       clearSelection();
       refreshLeads();
+      const blockedNote =
+        skippedBlocked && skippedBlocked > 0
+          ? ` ${skippedBlocked} blocked compan${skippedBlocked === 1 ? 'y was' : 'ies were'} skipped.`
+          : '';
       if (enrichmentWarning) {
         setSendMessage({
           type: 'warning',
-          text: `${sent} sent to Leads (backlog / pipeline). LinkedIn enrichment could not run.`,
+          text: `${sent} sent to Leads (backlog / pipeline).${blockedNote} LinkedIn enrichment could not run.`,
         });
       } else {
-        const parts: string[] = [`${sent} sent to Leads (backlog / pipeline).`];
+        const parts: string[] = [`${sent} sent to Leads (backlog / pipeline).${blockedNote}`];
         parts.push(`${enriched} compan${enriched === 1 ? 'y' : 'ies'} enriched with LinkedIn data.`);
         if (personaCompaniesProcessed != null && personaCompaniesProcessed > 0) {
           parts.push(

@@ -10,7 +10,8 @@ import { supabase, supabaseUrl, getCurrentUser } from './supabase';
 import { mapWorkplaceTypesToHarvestApi } from './harvestLinkedInMaps';
 import { computeLeadScore } from './leadScore';
 import { LINKEDIN_JOB_POST_CHANNEL } from './leadChannels';
-import type { ApifyJobResult, Database } from '@/types/database';
+import { isLeadCompanyBlockedByNormalizedSet, normalizeBlockedCompanyName, buildDefaultBlockedCompanyNormalizedSet } from './blockedCompanies';
+import type { ApifyJobResult, Database, Lead } from '@/types/database';
 
 /** Supabase Functions gateway expects `apikey` (anon) alongside `Authorization: Bearer <user_jwt>`. */
 const supabaseAnonKey =
@@ -1253,6 +1254,7 @@ async function invokeEnrichLeadPersonasWithRetry(
  */
 export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
   sent: number;
+  skippedBlocked?: number;
   enriched: number;
   personaCompaniesProcessed?: number;
   personaLeadsCreated?: number;
@@ -1265,10 +1267,46 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
   const { data: authData } = await db.auth.getUser();
   const currentUserId = authData?.user?.id ?? null;
 
+  // Filter out blocked companies (they can still appear in Saved Searches, but should not be moved into the CRM pipeline).
+  const blockedNormalized = buildDefaultBlockedCompanyNormalizedSet();
+  if (currentUserId) {
+    try {
+      const { data } = await db
+        .from('blocked_companies')
+        .select('company_name_normalized')
+        .eq('user_id', currentUserId);
+      for (const row of (data ?? []) as { company_name_normalized?: string | null }[]) {
+        const n = normalizeBlockedCompanyName(row.company_name_normalized ?? '');
+        if (n) blockedNormalized.add(n);
+      }
+    } catch {
+      // ignore: fall back to defaults only
+    }
+  }
+
+  let allowedLeadIds = leadIds;
+  let skippedBlocked = 0;
+  try {
+    const { data: rows } = await db
+      .from('leads')
+      .select('id, company_name, contact_name, job_title')
+      .in('id', leadIds);
+    const candidates = (rows ?? []) as Lead[];
+    const allowed = candidates.filter((l) => !isLeadCompanyBlockedByNormalizedSet(l, blockedNormalized)).map((l) => l.id);
+    allowedLeadIds = allowed;
+    skippedBlocked = leadIds.length - allowedLeadIds.length;
+  } catch {
+    // If we can't read candidates (RLS/network), do not block to avoid breaking send.
+    allowedLeadIds = leadIds;
+    skippedBlocked = 0;
+  }
+
+  if (allowedLeadIds.length === 0) return { sent: 0, enriched: 0, skippedBlocked };
+
   const { data: updatedRows, error: updateError } = await db
     .from('leads')
     .update({ is_marked_as_lead: true, status: 'backlog', updated_at: new Date().toISOString() } as never)
-    .in('id', leadIds)
+    .in('id', allowedLeadIds)
     .select('id');
 
   if (updateError) throw new Error(updateError.message);
@@ -1278,9 +1316,9 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
       'No leads were updated. They may be missing or your session may not allow updating them. Try refreshing and signing in again.'
     );
   }
-  if (updatedCount < leadIds.length) {
+  if (updatedCount < allowedLeadIds.length) {
     throw new Error(
-      `Only ${updatedCount} of ${leadIds.length} leads were updated (permission or missing rows). Check that all selected rows belong to your account.`
+      `Only ${updatedCount} of ${allowedLeadIds.length} leads were updated (permission or missing rows). Check that all selected rows belong to your account.`
     );
   }
 
@@ -1289,7 +1327,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
     const { data: channelRows } = await db
       .from('leads')
       .select('id, channel, job_url')
-      .in('id', leadIds);
+      .in('id', allowedLeadIds);
     const needChannel = (channelRows ?? []).filter(
       (r: { id: string; channel: string | null; job_url: string | null }) =>
         !(r.channel && r.channel.trim()) &&
@@ -1319,7 +1357,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
     const { data: leadsForTasks } = await db
       .from('leads')
       .select('id, user_id, company_name, contact_name')
-      .in('id', leadIds);
+      .in('id', allowedLeadIds);
 
     const leadsArray = (leadsForTasks ?? []) as {
       id: string;
@@ -1378,7 +1416,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
     const hasBrowserApify = await userHasActiveApifyKeyInSettings();
     if (hasBrowserApify) {
       try {
-        enriched = await enrichLeadCompaniesInBrowser(leadIds);
+        enriched = await enrichLeadCompaniesInBrowser(allowedLeadIds);
       } catch (browserErr) {
         console.warn('enrichLeadCompaniesInBrowser (preferred path):', browserErr);
       }
@@ -1386,7 +1424,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
 
     if (enriched === 0) {
       try {
-        enriched = await invokeEnrichLeadCompaniesWithRetry(db, leadIds, currentUserId);
+        enriched = await invokeEnrichLeadCompaniesWithRetry(db, allowedLeadIds, currentUserId);
       } catch (edgeCompanyErr) {
         const edgeMsg = edgeCompanyErr instanceof Error ? edgeCompanyErr.message : String(edgeCompanyErr);
         const authOrJwt =
@@ -1394,7 +1432,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
           /Session expired|sign in again|issuer mismatch|Tu sesión pertenece/i.test(edgeMsg);
         if (!hasBrowserApify && authOrJwt && (await userHasActiveApifyKeyInSettings())) {
           try {
-            enriched = await enrichLeadCompaniesInBrowser(leadIds);
+            enriched = await enrichLeadCompaniesInBrowser(allowedLeadIds);
           } catch (browserErr) {
             console.warn('Browser Apify enrich fallback failed:', browserErr);
           }
@@ -1405,7 +1443,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
       }
     }
 
-    const personaResult = await invokeEnrichLeadPersonasWithRetry(db, leadIds, currentUserId);
+    const personaResult = await invokeEnrichLeadPersonasWithRetry(db, allowedLeadIds, currentUserId);
     if (personaResult) {
       personaCompaniesProcessed = personaResult.companiesProcessed;
       personaLeadsCreated = personaResult.leadsCreated;
@@ -1417,6 +1455,7 @@ export async function sendSelectedToLeadsAndEnrich(leadIds: string[]): Promise<{
 
   return {
     sent: updatedCount,
+    skippedBlocked,
     enriched,
     personaCompaniesProcessed,
     personaLeadsCreated,

@@ -6,6 +6,7 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
+- **Bloqueo visual + skip al enviar a Leads:** Se agregó una blocklist por defecto (Twine, Mercor, Alignerr, etc.) fusionada con `blocked_companies` del usuario. En tablas se muestran en **rojo + tachado** y al hacer “Send to leads” se **saltan** (no pasan al pipeline), con mensaje indicando cuántas se omitieron.
 - **KPIs — no contar etapas positivas si terminó en Lost/Disqualified:** En `kpiUtils.computeKPIsByWeek` los conteos de Connected/Replies/Positive reply/Negotiation/Closed ahora se calculan por **status actual** en la ruta positiva y excluyen leads en `lost`/`disqualified` de esas etapas (solo cuentan en su bucket terminal). Evita falsos positivos como “Positive reply” para leads que hoy están en Lost.
 - **CRM — Assignee como select + bulk edit:** `assignee` se cambió a un dropdown con 3 opciones (Aron D'mello, Andres Leal, Juan Pablo Val) tanto en “Add lead” como en el popup del lead. Además, se añadió **bulk change** de assignee para los leads seleccionados en la tabla del CRM.
 - **KPIs — columnas de promedio/total:** En `KPITrackingView` se agregaron columnas a la derecha (**Total / Avg per week / Avg per day**) para cada KPI (First contact, Connected, Replies, etc.) calculadas sobre el timeframe seleccionado (p. ej. 4 semanas). Las celdas resumen también son clicables para ver la lista total del rango.
