@@ -5,7 +5,7 @@
 // inputs of the corresponding Apify Actor. Docs: https://apify.com/store
 // =====================================================
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   ArrowLeft,
   Search,
@@ -21,12 +21,12 @@ import {
   ChevronDown,
   Pencil,
   Check,
-} from 'lucide-react';
-import type { LeadSource } from './HomePage';
-import { useLeads } from '@/hooks/useLeads';
-import { LeadsTable } from '@/components/LeadsTable';
-import { supabase } from '@/lib/supabase';
-import type { Lead } from '@/types/database';
+} from "lucide-react";
+import type { LeadSource } from "./HomePage";
+import { useLeads } from "@/hooks/useLeads";
+import { LeadsTable } from "@/components/LeadsTable";
+import { supabase } from "@/lib/supabase";
+import type { Lead } from "@/types/database";
 
 // =====================================================
 // APIFY ACTOR INPUT SCHEMAS
@@ -37,7 +37,7 @@ import type { Lead } from '@/types/database';
 interface ActorInputField {
   key: string;
   label: string;
-  type: 'text' | 'textarea' | 'select' | 'number' | 'location' | 'locations';
+  type: "text" | "textarea" | "select" | "number" | "location" | "locations";
   placeholder?: string;
   required?: boolean;
   options?: { value: string; label: string }[];
@@ -46,43 +46,205 @@ interface ActorInputField {
   icon?: React.ReactNode;
 }
 
-// Predefined locations (USA, Canada, Europe) to avoid typos and save credits when testing
+// Countries list for location filters (keep in UI to avoid typos).
+// Includes "Remote" for convenience (not a country, but frequently used as a location needle).
 const LOCATION_OPTIONS = [
-  'United States',
-  'Canada',
-  'Remote',
-  'United Kingdom',
-  'Germany',
-  'France',
-  'Spain',
-  'Italy',
-  'Netherlands',
-  'Belgium',
-  'Ireland',
-  'Portugal',
-  'Switzerland',
-  'Austria',
-  'Sweden',
-  'Norway',
-  'Denmark',
-  'Finland',
-  'Poland',
-  'Czech Republic',
-  'Romania',
-  'Greece',
-  'Hungary',
-  'Ukraine',
-  'Croatia',
-  'Bulgaria',
-  'Slovakia',
-  'Slovenia',
-  'Lithuania',
-  'Latvia',
-  'Estonia',
-  'Luxembourg',
-  'Malta',
-  'Cyprus',
-  'Iceland',
+  "Remote",
+  "Afghanistan",
+  "Albania",
+  "Algeria",
+  "Andorra",
+  "Angola",
+  "Antigua and Barbuda",
+  "Argentina",
+  "Armenia",
+  "Australia",
+  "Austria",
+  "Azerbaijan",
+  "Bahamas",
+  "Bahrain",
+  "Bangladesh",
+  "Barbados",
+  "Belarus",
+  "Belgium",
+  "Belize",
+  "Benin",
+  "Bhutan",
+  "Bolivia",
+  "Bosnia and Herzegovina",
+  "Botswana",
+  "Brazil",
+  "Brunei",
+  "Bulgaria",
+  "Burkina Faso",
+  "Burundi",
+  "Cabo Verde",
+  "Cambodia",
+  "Cameroon",
+  "Canada",
+  "Central African Republic",
+  "Chad",
+  "Chile",
+  "China",
+  "Colombia",
+  "Comoros",
+  "Congo (Congo-Brazzaville)",
+  "Costa Rica",
+  "Côte d’Ivoire",
+  "Croatia",
+  "Cuba",
+  "Cyprus",
+  "Czech Republic",
+  "Democratic Republic of the Congo",
+  "Denmark",
+  "Djibouti",
+  "Dominica",
+  "Dominican Republic",
+  "Ecuador",
+  "Egypt",
+  "El Salvador",
+  "Equatorial Guinea",
+  "Eritrea",
+  "Estonia",
+  "Eswatini",
+  "Ethiopia",
+  "Fiji",
+  "Finland",
+  "France",
+  "Gabon",
+  "Gambia",
+  "Georgia",
+  "Germany",
+  "Ghana",
+  "Greece",
+  "Grenada",
+  "Guatemala",
+  "Guinea",
+  "Guinea-Bissau",
+  "Guyana",
+  "Haiti",
+  "Honduras",
+  "Hungary",
+  "Iceland",
+  "India",
+  "Indonesia",
+  "Iran",
+  "Iraq",
+  "Ireland",
+  "Israel",
+  "Italy",
+  "Jamaica",
+  "Japan",
+  "Jordan",
+  "Kazakhstan",
+  "Kenya",
+  "Kiribati",
+  "Kuwait",
+  "Kyrgyzstan",
+  "Laos",
+  "Latvia",
+  "Lebanon",
+  "Lesotho",
+  "Liberia",
+  "Libya",
+  "Liechtenstein",
+  "Lithuania",
+  "Luxembourg",
+  "Madagascar",
+  "Malawi",
+  "Malaysia",
+  "Maldives",
+  "Mali",
+  "Malta",
+  "Marshall Islands",
+  "Mauritania",
+  "Mauritius",
+  "Mexico",
+  "Micronesia",
+  "Moldova",
+  "Monaco",
+  "Mongolia",
+  "Montenegro",
+  "Morocco",
+  "Mozambique",
+  "Myanmar (Burma)",
+  "Namibia",
+  "Nauru",
+  "Nepal",
+  "Netherlands",
+  "New Zealand",
+  "Nicaragua",
+  "Niger",
+  "Nigeria",
+  "North Korea",
+  "North Macedonia",
+  "Norway",
+  "Oman",
+  "Pakistan",
+  "Palau",
+  "Panama",
+  "Papua New Guinea",
+  "Paraguay",
+  "Peru",
+  "Philippines",
+  "Poland",
+  "Portugal",
+  "Qatar",
+  "Romania",
+  "Russia",
+  "Rwanda",
+  "Saint Kitts and Nevis",
+  "Saint Lucia",
+  "Saint Vincent and the Grenadines",
+  "Samoa",
+  "San Marino",
+  "Sao Tome and Principe",
+  "Saudi Arabia",
+  "Senegal",
+  "Serbia",
+  "Seychelles",
+  "Sierra Leone",
+  "Singapore",
+  "Slovakia",
+  "Slovenia",
+  "Solomon Islands",
+  "Somalia",
+  "South Africa",
+  "South Korea",
+  "South Sudan",
+  "Spain",
+  "Sri Lanka",
+  "Sudan",
+  "Suriname",
+  "Sweden",
+  "Switzerland",
+  "Syria",
+  "Taiwan",
+  "Tajikistan",
+  "Tanzania",
+  "Thailand",
+  "Timor-Leste",
+  "Togo",
+  "Tonga",
+  "Trinidad and Tobago",
+  "Tunisia",
+  "Turkey",
+  "Turkmenistan",
+  "Tuvalu",
+  "Uganda",
+  "Ukraine",
+  "United Arab Emirates",
+  "United Kingdom",
+  "United States",
+  "Uruguay",
+  "Uzbekistan",
+  "Vanuatu",
+  "Vatican City",
+  "Venezuela",
+  "Vietnam",
+  "Yemen",
+  "Zambia",
+  "Zimbabwe",
 ];
 
 // Multi-select dropdown for locations (styled, with chips)
@@ -100,16 +262,22 @@ function LocationsMultiSelect({
   className: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onOutside = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     };
     if (open) {
-      document.addEventListener('mousedown', onOutside);
-      return () => document.removeEventListener('mousedown', onOutside);
+      document.addEventListener("mousedown", onOutside);
+      return () => document.removeEventListener("mousedown", onOutside);
     }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setQuery("");
   }, [open]);
 
   const toggle = (optValue: string) => {
@@ -155,26 +323,57 @@ function LocationsMultiSelect({
           )}
         </span>
         <ChevronDown
-          className={`w-5 h-5 text-vloom-muted flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`w-5 h-5 text-vloom-muted flex-shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
       {open && (
         <div className="absolute z-20 mt-1 w-full rounded-xl border border-vloom-border bg-vloom-surface shadow-lg max-h-64 overflow-y-auto">
-          <div className="p-2">
-            {options.map((opt) => (
-              <label
-                key={opt.value}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-vloom-border/30 cursor-pointer text-sm text-vloom-text"
-              >
-                <input
-                  type="checkbox"
-                  checked={value.includes(opt.value)}
-                  onChange={() => toggle(opt.value)}
-                  className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent/50"
-                />
-                <span>{opt.label}</span>
-              </label>
-            ))}
+          <div className="p-2 space-y-2">
+            <div className="px-2 pt-1">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search locations..."
+                className="w-full px-3 py-2 rounded-lg border border-vloom-border bg-vloom-bg text-sm text-vloom-text placeholder-vloom-muted focus:outline-none focus:ring-2 focus:ring-vloom-accent/30"
+                autoFocus
+              />
+            </div>
+            {options
+              .filter((opt) => {
+                const q = query.trim().toLowerCase();
+                if (!q) return true;
+                return (
+                  opt.label.toLowerCase().includes(q) ||
+                  opt.value.toLowerCase().includes(q)
+                );
+              })
+              .map((opt) => (
+                <label
+                  key={opt.value}
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-vloom-border/30 cursor-pointer text-sm text-vloom-text"
+                >
+                  <input
+                    type="checkbox"
+                    checked={value.includes(opt.value)}
+                    onChange={() => toggle(opt.value)}
+                    className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent/50"
+                  />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            {options.filter((opt) => {
+              const q = query.trim().toLowerCase();
+              if (!q) return true;
+              return (
+                opt.label.toLowerCase().includes(q) ||
+                opt.value.toLowerCase().includes(q)
+              );
+            }).length === 0 && (
+              <div className="px-3 py-3 text-sm text-vloom-muted">
+                No matches.
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -186,284 +385,315 @@ function LocationsMultiSelect({
 const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
   // HarvestAPI LinkedIn Job Search - harvestapi/linkedin-job-search
   // Docs: https://apify.com/harvestapi/linkedin-job-search
-  'harvestapi/linkedin-job-search': [
+  "harvestapi/linkedin-job-search": [
     {
-      key: 'jobTitles',
-      label: 'Job titles / Keywords',
-      type: 'text',
-      placeholder: 'Video Editor, Motion Designer, Content Creator...',
+      key: "jobTitles",
+      label: "Job titles / Keywords",
+      type: "text",
+      placeholder: "Video Editor, Motion Designer, Content Creator...",
       required: true,
-      helpText: 'One or more job titles. Separate multiple with commas.',
+      helpText: "One or more job titles. Separate multiple with commas.",
       icon: <Search className="w-4 h-4" />,
     },
     {
-      key: 'locations',
-      label: 'Locations',
-      type: 'locations',
+      key: "locations",
+      label: "Locations",
+      type: "locations",
       required: false,
       options: LOCATION_OPTIONS.map((loc) => ({ value: loc, label: loc })),
-      defaultValue: '',
+      defaultValue: "",
       helpText:
-        'Optional. Geo locations (country, city). If you only pick Remote here, we send it to LinkedIn as a workplace filter, not as a place name.',
+        "Optional. Geo locations (country, city). If you only pick Remote here, we send it to LinkedIn as a workplace filter, not as a place name.",
       icon: <MapPin className="w-4 h-4" />,
     },
     {
-      key: 'workplaceType',
-      label: 'Workplace (Remote / Hybrid / On-site)',
-      type: 'locations',
+      key: "workplaceType",
+      label: "Workplace (Remote / Hybrid / On-site)",
+      type: "locations",
       required: false,
       options: [
-        { value: 'Remote', label: 'Remote' },
-        { value: 'Hybrid', label: 'Hybrid' },
-        { value: 'On-site', label: 'On-site' },
+        { value: "Remote", label: "Remote" },
+        { value: "Hybrid", label: "Hybrid" },
+        { value: "On-site", label: "On-site" },
       ],
-      defaultValue: '',
-      helpText: 'Optional. LinkedIn job filters by workplace type (separate from location). Combine with locations as needed.',
+      defaultValue: "",
+      helpText:
+        "Optional. LinkedIn job filters by workplace type (separate from location). Combine with locations as needed.",
       icon: <Briefcase className="w-4 h-4" />,
     },
     {
-      key: 'postedLimit',
-      label: 'Date posted',
-      type: 'select',
+      key: "postedLimit",
+      label: "Date posted",
+      type: "select",
       options: [
-        { value: 'Past 1 hour', label: 'Past 1 hour' },
-        { value: 'Past 24 hours', label: 'Past 24 hours' },
-        { value: 'Past Week', label: 'Past week' },
-        { value: 'Past Month', label: 'Past month' },
+        { value: "Past 1 hour", label: "Past 1 hour" },
+        { value: "Past 24 hours", label: "Past 24 hours" },
+        { value: "Past Week", label: "Past week" },
+        { value: "Past Month", label: "Past month" },
       ],
-      defaultValue: 'Past 1 hour',
-      helpText: 'Only jobs posted in this period. Use "Past 1 hour" for quick tests to save credits.',
+      defaultValue: "Past 1 hour",
+      helpText:
+        'Only jobs posted in this period. Use "Past 1 hour" for quick tests to save credits.',
       icon: <Clock className="w-4 h-4" />,
     },
     {
-      key: 'maxItems',
-      label: 'Max results',
-      type: 'number',
-      placeholder: '500',
+      key: "maxItems",
+      label: "Max results",
+      type: "number",
+      placeholder: "500",
       defaultValue: 500,
-      helpText: 'Maximum number of jobs to fetch. Use 500 to scrape all jobs for the selected period (e.g. past 24 hours).',
+      helpText:
+        "Maximum number of jobs to fetch. Use 500 to scrape all jobs for the selected period (e.g. past 24 hours).",
       icon: <Hash className="w-4 h-4" />,
     },
     {
-      key: 'sort',
-      label: 'Sort by',
-      type: 'select',
+      key: "sort",
+      label: "Sort by",
+      type: "select",
       options: [
-        { value: 'date', label: 'Most recent' },
-        { value: 'relevance', label: 'Relevance' },
+        { value: "date", label: "Most recent" },
+        { value: "relevance", label: "Relevance" },
       ],
-      defaultValue: 'date',
+      defaultValue: "date",
       icon: <Filter className="w-4 h-4" />,
     },
     {
-      key: 'excludeDomains',
-      label: 'Exclude company domains',
-      type: 'text',
-      placeholder: 'staffingagency.com, anotherdomain.com',
+      key: "excludeDomains",
+      label: "Exclude company domains",
+      type: "text",
+      placeholder: "staffingagency.com, anotherdomain.com",
       required: false,
       helpText:
-        'Optional. Comma-separated list of company website domains to skip (e.g. staffing or recruiting agencies).',
+        "Optional. Comma-separated list of company website domains to skip (e.g. staffing or recruiting agencies).",
       icon: <Briefcase className="w-4 h-4" />,
     },
   ],
 
   // HarvestAPI LinkedIn Post Search (No Cookies) - harvestapi/linkedin-post-search
   // Docs: https://apify.com/harvestapi/linkedin-post-search
-  'harvestapi/linkedin-post-search': [
+  "harvestapi/linkedin-post-search": [
     {
-      key: 'searchQueries',
-      label: 'Keywords / Search queries',
-      type: 'textarea',
-      placeholder: 'e.g.\ncrm para inmobiliarias\n"lead generation" software\nmarketing automation AND B2B',
+      key: "searchQueries",
+      label: "Keywords / Search queries",
+      type: "textarea",
+      placeholder:
+        'e.g.\ncrm para inmobiliarias\n"lead generation" software\nmarketing automation AND B2B',
       required: true,
-      helpText: 'One query per line. These are the same queries you would type in LinkedIn post search.',
+      helpText:
+        "One query per line. These are the same queries you would type in LinkedIn post search.",
       icon: <Search className="w-4 h-4" />,
     },
     {
-      key: 'authorLocations',
-      label: 'Author location contains (optional)',
-      type: 'locations',
+      key: "authorLocationMode",
+      label: "Author location filter (optional)",
+      type: "select",
+      options: [
+        { value: "include", label: "Include these locations" },
+        { value: "exclude", label: "Exclude these locations" },
+      ],
+      defaultValue: "include",
+      helpText:
+        "Choose whether to include or exclude authors from the selected locations below. This is applied after scraping (post-filter).",
+      icon: <Filter className="w-4 h-4" />,
+    },
+    {
+      key: "authorLocations",
+      label: "Author location contains (optional)",
+      type: "locations",
       required: false,
       helpText:
-        "Optional post-filter. We'll keep only posts where the actor output includes an author location that matches one of these locations.",
+        "Optional post-filter. Uses author profile enrichment; when author location cannot be fetched, we keep the post (best-effort) to avoid losing most results.",
       icon: <MapPin className="w-4 h-4" />,
       options: LOCATION_OPTIONS.map((loc) => ({ value: loc, label: loc })),
     },
     {
-      key: 'postedLimit',
-      label: 'Posted limit',
-      type: 'select',
-      options: [
-        { value: 'any', label: 'Any time' },
-        { value: '1h', label: 'Past 1 hour' },
-        { value: '24h', label: 'Past 24 hours' },
-        { value: 'week', label: 'Past week' },
-        { value: 'month', label: 'Past month' },
-        { value: '3months', label: 'Past 3 months' },
-        { value: '6months', label: 'Past 6 months' },
-        { value: 'year', label: 'Past year' },
-      ],
-      defaultValue: 'week',
-      helpText: 'Only posts within this time window. Use shorter windows to save credits when testing.',
-      icon: <Clock className="w-4 h-4" />,
-    },
-    {
-      key: 'maxPosts',
-      label: 'Max posts per query',
-      type: 'number',
-      placeholder: '200',
+      key: "maxAuthorUrlsToScrape",
+      label: "Max author profiles to check (location filter)",
+      type: "number",
+      placeholder: "200",
       defaultValue: 200,
-      helpText: 'Maximum number of posts to scrape per query. More posts = higher cost.',
+      helpText:
+        "Only used when you select Author locations. Higher values make Include/Exclude more accurate, but can increase cost/time because we scrape more author profiles.",
       icon: <Hash className="w-4 h-4" />,
     },
     {
-      key: 'sortBy',
-      label: 'Sort by',
-      type: 'select',
+      key: "postedLimit",
+      label: "Posted limit",
+      type: "select",
       options: [
-        { value: 'date', label: 'Most recent' },
-        { value: 'relevance', label: 'Relevance' },
+        { value: "any", label: "Any time" },
+        { value: "1h", label: "Past 1 hour" },
+        { value: "24h", label: "Past 24 hours" },
+        { value: "week", label: "Past week" },
+        { value: "month", label: "Past month" },
+        { value: "3months", label: "Past 3 months" },
+        { value: "6months", label: "Past 6 months" },
+        { value: "year", label: "Past year" },
       ],
-      defaultValue: 'date',
+      defaultValue: "week",
+      helpText:
+        "Only posts within this time window. Use shorter windows to save credits when testing.",
+      icon: <Clock className="w-4 h-4" />,
+    },
+    {
+      key: "maxPosts",
+      label: "Max posts per query",
+      type: "number",
+      placeholder: "200",
+      defaultValue: 200,
+      helpText:
+        "Maximum number of posts to scrape per query. More posts = higher cost.",
+      icon: <Hash className="w-4 h-4" />,
+    },
+    {
+      key: "sortBy",
+      label: "Sort by",
+      type: "select",
+      options: [
+        { value: "date", label: "Most recent" },
+        { value: "relevance", label: "Relevance" },
+      ],
+      defaultValue: "date",
       icon: <Filter className="w-4 h-4" />,
     },
     {
-      key: 'contentType',
-      label: 'Content type',
-      type: 'select',
+      key: "contentType",
+      label: "Content type",
+      type: "select",
       options: [
-        { value: 'all', label: 'All' },
-        { value: 'videos', label: 'Videos' },
-        { value: 'images', label: 'Images' },
-        { value: 'documents', label: 'Documents' },
-        { value: 'live_videos', label: 'Live videos' },
-        { value: 'jobs', label: 'Jobs posts' },
-        { value: 'collaborative_articles', label: 'Collaborative articles' },
+        { value: "all", label: "All" },
+        { value: "videos", label: "Videos" },
+        { value: "images", label: "Images" },
+        { value: "documents", label: "Documents" },
+        { value: "live_videos", label: "Live videos" },
+        { value: "jobs", label: "Jobs posts" },
+        { value: "collaborative_articles", label: "Collaborative articles" },
       ],
-      defaultValue: 'all',
-      helpText: 'Optional filter. Keep “All” for broad discovery.',
+      defaultValue: "all",
+      helpText: "Optional filter. Keep “All” for broad discovery.",
       icon: <Filter className="w-4 h-4" />,
     },
   ],
 
   // Legacy: bebity/linkedin-jobs-scraper
-  'bebity/linkedin-jobs-scraper': [
+  "bebity/linkedin-jobs-scraper": [
     {
-      key: 'searchQueries',
-      label: 'Keywords',
-      type: 'text',
-      placeholder: 'Video Editor, Motion Designer, Content Creator...',
+      key: "searchQueries",
+      label: "Keywords",
+      type: "text",
+      placeholder: "Video Editor, Motion Designer, Content Creator...",
       required: true,
-      helpText: 'Job titles or keywords to search for. Separate multiple with commas.',
+      helpText:
+        "Job titles or keywords to search for. Separate multiple with commas.",
       icon: <Search className="w-4 h-4" />,
     },
     {
-      key: 'location',
-      label: 'Location',
-      type: 'location',
-      placeholder: 'United States, Remote, New York...',
+      key: "location",
+      label: "Location",
+      type: "location",
+      placeholder: "United States, Remote, New York...",
       required: false,
-      helpText: 'Leave empty for worldwide results',
+      helpText: "Leave empty for worldwide results",
       icon: <MapPin className="w-4 h-4" />,
     },
     {
-      key: 'publishedAt',
-      label: 'Date Posted',
-      type: 'select',
+      key: "publishedAt",
+      label: "Date Posted",
+      type: "select",
       options: [
-        { value: 'anyTime', label: 'Any time' },
-        { value: 'pastMonth', label: 'Past month' },
-        { value: 'pastWeek', label: 'Past week' },
-        { value: 'past24Hours', label: 'Past 24 hours' },
+        { value: "anyTime", label: "Any time" },
+        { value: "pastMonth", label: "Past month" },
+        { value: "pastWeek", label: "Past week" },
+        { value: "past24Hours", label: "Past 24 hours" },
       ],
-      defaultValue: 'pastWeek',
-      helpText: 'Filter by when the job was posted',
+      defaultValue: "pastWeek",
+      helpText: "Filter by when the job was posted",
       icon: <Clock className="w-4 h-4" />,
     },
     {
-      key: 'experienceLevel',
-      label: 'Experience Level',
-      type: 'select',
+      key: "experienceLevel",
+      label: "Experience Level",
+      type: "select",
       options: [
-        { value: '', label: 'All levels' },
-        { value: 'internship', label: 'Internship' },
-        { value: 'entryLevel', label: 'Entry level' },
-        { value: 'associate', label: 'Associate' },
-        { value: 'midSeniorLevel', label: 'Mid-Senior level' },
-        { value: 'director', label: 'Director' },
-        { value: 'executive', label: 'Executive' },
+        { value: "", label: "All levels" },
+        { value: "internship", label: "Internship" },
+        { value: "entryLevel", label: "Entry level" },
+        { value: "associate", label: "Associate" },
+        { value: "midSeniorLevel", label: "Mid-Senior level" },
+        { value: "director", label: "Director" },
+        { value: "executive", label: "Executive" },
       ],
-      defaultValue: '',
+      defaultValue: "",
       icon: <Briefcase className="w-4 h-4" />,
     },
     {
-      key: 'rows',
-      label: 'Max Results',
-      type: 'number',
-      placeholder: '50',
+      key: "rows",
+      label: "Max Results",
+      type: "number",
+      placeholder: "50",
       defaultValue: 50,
-      helpText: 'Maximum number of jobs to scrape (more = higher cost)',
+      helpText: "Maximum number of jobs to scrape (more = higher cost)",
       icon: <Hash className="w-4 h-4" />,
     },
   ],
 
   // Indeed Scraper - misceres/indeed-scraper
   // Docs: https://apify.com/misceres/indeed-scraper
-  'misceres/indeed-scraper': [
+  "misceres/indeed-scraper": [
     {
-      key: 'position',
-      label: 'Job Title / Keywords',
-      type: 'text',
-      placeholder: 'Video Editor',
+      key: "position",
+      label: "Job Title / Keywords",
+      type: "text",
+      placeholder: "Video Editor",
       required: true,
-      helpText: 'The position or keywords to search for',
+      helpText: "The position or keywords to search for",
       icon: <Search className="w-4 h-4" />,
     },
     {
-      key: 'location',
-      label: 'Location',
-      type: 'location',
-      placeholder: 'New York, NY',
+      key: "location",
+      label: "Location",
+      type: "location",
+      placeholder: "New York, NY",
       required: false,
-      helpText: 'City, state, or country',
+      helpText: "City, state, or country",
       icon: <MapPin className="w-4 h-4" />,
     },
     {
-      key: 'maxItems',
-      label: 'Max Results',
-      type: 'number',
-      placeholder: '50',
+      key: "maxItems",
+      label: "Max Results",
+      type: "number",
+      placeholder: "50",
       defaultValue: 50,
-      helpText: 'Maximum number of listings to scrape',
+      helpText: "Maximum number of listings to scrape",
       icon: <Hash className="w-4 h-4" />,
     },
   ],
 
   // Glassdoor Jobs Scraper - epctex/glassdoor-jobs-scraper
   // Docs: https://apify.com/epctex/glassdoor-jobs-scraper
-  'epctex/glassdoor-jobs-scraper': [
+  "epctex/glassdoor-jobs-scraper": [
     {
-      key: 'keyword',
-      label: 'Keywords',
-      type: 'text',
-      placeholder: 'Video Editor',
+      key: "keyword",
+      label: "Keywords",
+      type: "text",
+      placeholder: "Video Editor",
       required: true,
-      helpText: 'Job title or keywords',
+      helpText: "Job title or keywords",
       icon: <Search className="w-4 h-4" />,
     },
     {
-      key: 'location',
-      label: 'Location',
-      type: 'location',
-      placeholder: 'Los Angeles, CA',
+      key: "location",
+      label: "Location",
+      type: "location",
+      placeholder: "Los Angeles, CA",
       required: false,
       icon: <MapPin className="w-4 h-4" />,
     },
     {
-      key: 'maxItems',
-      label: 'Max Results',
-      type: 'number',
-      placeholder: '50',
+      key: "maxItems",
+      label: "Max Results",
+      type: "number",
+      placeholder: "50",
       defaultValue: 50,
       icon: <Hash className="w-4 h-4" />,
     },
@@ -517,12 +747,14 @@ function SearchResultsTable({ scrapingJobId }: { scrapingJobId: string }) {
     (lead: Lead) => {
       toggleSelection(lead.id);
     },
-    [toggleSelection]
+    [toggleSelection],
   );
 
   if (error) {
     return (
-      <div className="rounded-xl border border-vloom-border bg-vloom-surface p-4 text-sm text-red-600">{error}</div>
+      <div className="rounded-xl border border-vloom-border bg-vloom-surface p-4 text-sm text-red-600">
+        {error}
+      </div>
     );
   }
 
@@ -530,7 +762,9 @@ function SearchResultsTable({ scrapingJobId }: { scrapingJobId: string }) {
   return (
     <div className="rounded-xl border border-vloom-border bg-vloom-surface overflow-hidden">
       <div className="p-3 border-b border-vloom-border flex items-center justify-between">
-        <h3 className="text-sm font-medium text-vloom-text">Results ({totalCount})</h3>
+        <h3 className="text-sm font-medium text-vloom-text">
+          Results ({totalCount})
+        </h3>
         <button
           type="button"
           onClick={() => refreshLeads()}
@@ -556,13 +790,16 @@ function SearchResultsTable({ scrapingJobId }: { scrapingJobId: string }) {
         onStatusChange={(lead, status) => updateLeadStatus(lead.id, status)}
         onToggleShare={noop}
         onViewDetails={handleRowCellActivate}
-        onMarkAsLead={(lead, value) => updateLead(lead.id, { is_marked_as_lead: value })}
+        onMarkAsLead={(lead, value) =>
+          updateLead(lead.id, { is_marked_as_lead: value })
+        }
       />
       {totalCount > pagination.pageSize && (
         <div className="p-3 border-t border-vloom-border flex items-center justify-between text-sm text-vloom-muted">
           <span>
-            Showing {(pagination.page - 1) * pagination.pageSize + 1} to{' '}
-            {Math.min(pagination.page * pagination.pageSize, totalCount)} of {totalCount}
+            Showing {(pagination.page - 1) * pagination.pageSize + 1} to{" "}
+            {Math.min(pagination.page * pagination.pageSize, totalCount)} of{" "}
+            {totalCount}
           </span>
           <div className="flex gap-2">
             <button
@@ -573,7 +810,9 @@ function SearchResultsTable({ scrapingJobId }: { scrapingJobId: string }) {
             >
               Previous
             </button>
-            <span className="px-2 py-1 bg-vloom-border rounded">{pagination.page}</span>
+            <span className="px-2 py-1 bg-vloom-border rounded">
+              {pagination.page}
+            </span>
             <button
               type="button"
               onClick={() => setPage(pagination.page + 1)}
@@ -600,7 +839,7 @@ function RefreshSessionButton({ onSuccess }: { onSuccess: () => void }) {
       if (data?.session) {
         onSuccess();
       } else {
-        throw new Error('No session');
+        throw new Error("No session");
       }
     } catch {
       setLoading(false);
@@ -614,7 +853,7 @@ function RefreshSessionButton({ onSuccess }: { onSuccess: () => void }) {
       disabled={loading}
       className="mt-3 px-3 py-1.5 rounded-lg bg-amber-200/80 dark:bg-amber-500/30 hover:bg-amber-300/80 dark:hover:bg-amber-500/50 font-medium text-amber-900 dark:text-amber-100 disabled:opacity-50"
     >
-      {loading ? 'Actualizando…' : 'Actualizar sesión y volver a intentar'}
+      {loading ? "Actualizando…" : "Actualizar sesión y volver a intentar"}
     </button>
   );
 }
@@ -622,7 +861,10 @@ function RefreshSessionButton({ onSuccess }: { onSuccess: () => void }) {
 interface SearchConfigPageProps {
   source: LeadSource;
   onBack: () => void;
-  onSearch: (source: LeadSource, params: Record<string, unknown>) => Promise<void>;
+  onSearch: (
+    source: LeadSource,
+    params: Record<string, unknown>,
+  ) => Promise<void>;
   lastSearchResult?: LastSearchResult | null;
   onDismissResult?: () => void;
 }
@@ -637,16 +879,19 @@ export function SearchConfigPage({
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [isSearching, setIsSearching] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [resultSavedSearchId, setResultSavedSearchId] = useState<string | null>(null);
-  const [resultSavedSearchName, setResultSavedSearchName] = useState<string>('');
+  const [resultSavedSearchId, setResultSavedSearchId] = useState<string | null>(
+    null,
+  );
+  const [resultSavedSearchName, setResultSavedSearchName] =
+    useState<string>("");
   const [renaming, setRenaming] = useState(false);
-  const [renameDraft, setRenameDraft] = useState('');
+  const [renameDraft, setRenameDraft] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
 
   const inputSchema = useMemo(
     () => ACTOR_INPUT_SCHEMAS[source.apifyActorId] || [],
-    [source.apifyActorId]
+    [source.apifyActorId],
   );
 
   // Initialize default values
@@ -674,7 +919,7 @@ export function SearchConfigPage({
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
-    
+
     inputSchema.forEach((field) => {
       if (field.required && !formData[field.key]) {
         newErrors[field.key] = `${field.label} is required`;
@@ -687,7 +932,7 @@ export function SearchConfigPage({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) return;
 
     setIsSearching(true);
@@ -701,17 +946,17 @@ export function SearchConfigPage({
   useEffect(() => {
     if (lastSearchResult?.ok) {
       const id = lastSearchResult.savedSearchId ?? null;
-      const name = lastSearchResult.savedSearchName ?? '';
+      const name = lastSearchResult.savedSearchName ?? "";
       setResultSavedSearchId(id);
       setResultSavedSearchName(name);
       setRenaming(false);
-      setRenameDraft('');
+      setRenameDraft("");
       setRenameError(null);
     } else {
       setResultSavedSearchId(null);
-      setResultSavedSearchName('');
+      setResultSavedSearchName("");
       setRenaming(false);
-      setRenameDraft('');
+      setRenameDraft("");
       setRenameError(null);
     }
   }, [lastSearchResult]);
@@ -722,17 +967,20 @@ export function SearchConfigPage({
     const name = renameDraft.trim();
     if (!name) return;
     if (!supabase) {
-      setRenameError('Supabase not configured.');
+      setRenameError("Supabase not configured.");
       return;
     }
     setRenameSaving(true);
     setRenameError(null);
     try {
-      const { error } = await supabase.from('saved_searches').update({ name } as never).eq('id', id);
+      const { error } = await supabase
+        .from("saved_searches")
+        .update({ name } as never)
+        .eq("id", id);
       if (error) throw error;
       setResultSavedSearchName(name);
       setRenaming(false);
-      setRenameDraft('');
+      setRenameDraft("");
     } catch (e) {
       setRenameError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -741,13 +989,13 @@ export function SearchConfigPage({
   };
 
   const renderField = (field: ActorInputField) => {
-    const value = formData[field.key] ?? '';
+    const value = formData[field.key] ?? "";
     const error = errors[field.key];
 
     const baseInputClass = `
       w-full pl-10 pr-4 py-3 border rounded-xl text-vloom-text placeholder-vloom-muted
       focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent transition-all bg-vloom-surface
-      ${error ? 'border-red-400 bg-red-50' : 'border-vloom-border'}
+      ${error ? "border-red-400 bg-red-50" : "border-vloom-border"}
     `;
 
     return (
@@ -756,7 +1004,7 @@ export function SearchConfigPage({
           {field.label}
           {field.required && <span className="text-red-500">*</span>}
         </label>
-        
+
         <div className="relative">
           {field.icon && (
             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-vloom-muted">
@@ -764,7 +1012,7 @@ export function SearchConfigPage({
             </div>
           )}
 
-          {field.type === 'select' ? (
+          {field.type === "select" ? (
             <select
               value={value as string}
               onChange={(e) => handleChange(field.key, e.target.value)}
@@ -776,7 +1024,7 @@ export function SearchConfigPage({
                 </option>
               ))}
             </select>
-          ) : field.type === 'textarea' ? (
+          ) : field.type === "textarea" ? (
             <textarea
               value={value as string}
               onChange={(e) => handleChange(field.key, e.target.value)}
@@ -784,19 +1032,30 @@ export function SearchConfigPage({
               rows={4}
               className={`${baseInputClass} resize-y min-h-[96px] leading-relaxed`}
             />
-          ) : field.type === 'locations' ? (
+          ) : field.type === "locations" ? (
             <LocationsMultiSelect
               options={field.options ?? []}
-              value={(value as string) ? (value as string).split(',').map((s: string) => s.trim()).filter(Boolean) : []}
-              onChange={(selected) => handleChange(field.key, selected.join(', '))}
+              value={
+                (value as string)
+                  ? (value as string)
+                      .split(",")
+                      .map((s: string) => s.trim())
+                      .filter(Boolean)
+                  : []
+              }
+              onChange={(selected) =>
+                handleChange(field.key, selected.join(", "))
+              }
               placeholder="Select locations..."
               className={baseInputClass}
             />
-          ) : field.type === 'number' ? (
+          ) : field.type === "number" ? (
             <input
               type="number"
               value={value as number}
-              onChange={(e) => handleChange(field.key, parseInt(e.target.value) || 0)}
+              onChange={(e) =>
+                handleChange(field.key, parseInt(e.target.value) || 0)
+              }
               placeholder={field.placeholder}
               min={1}
               max={500}
@@ -844,11 +1103,15 @@ export function SearchConfigPage({
 
       <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="flex items-start gap-4 mb-8">
-          <div className={`w-12 h-12 rounded-lg ${source.bgColor} ${source.color} flex items-center justify-center flex-shrink-0`}>
+          <div
+            className={`w-12 h-12 rounded-lg ${source.bgColor} ${source.color} flex items-center justify-center flex-shrink-0`}
+          >
             {source.icon}
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-vloom-text">{source.name}</h1>
+            <h1 className="text-2xl font-bold text-vloom-text">
+              {source.name}
+            </h1>
             <p className="text-vloom-muted">{source.description}</p>
           </div>
         </div>
@@ -897,24 +1160,29 @@ export function SearchConfigPage({
                 <div
                   className={`rounded-xl border p-4 flex items-center justify-between gap-4 text-sm ${
                     lastSearchResult.asyncImport
-                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:bg-amber-500/10 dark:border-amber-500/40 dark:text-amber-100'
-                      : 'bg-green-500/10 border-green-500/30 text-green-800 dark:bg-green-500/10 dark:border-green-500/30 dark:text-green-200'
+                      ? "bg-amber-500/10 border-amber-500/30 text-amber-900 dark:bg-amber-500/10 dark:border-amber-500/40 dark:text-amber-100"
+                      : "bg-green-500/10 border-green-500/30 text-green-800 dark:bg-green-500/10 dark:border-green-500/30 dark:text-green-200"
                   }`}
                 >
                   <div className="min-w-0">
                     <p className="font-medium">
-                      {lastSearchResult.asyncImport ? 'Search started (background import)' : 'Search finished'}
+                      {lastSearchResult.asyncImport
+                        ? "Search started (background import)"
+                        : "Search finished"}
                     </p>
                     <p className="mt-1">
                       {lastSearchResult.asyncImport ? (
                         <>
                           {lastSearchResult.asyncMessage ??
-                            'Apify is still running. Results will load below when the import completes — use Refresh in the results header.'}
+                            "Apify is still running. Results will load below when the import completes — use Refresh in the results header."}
                         </>
                       ) : (
                         <>
-                          <span className="font-medium">{lastSearchResult.imported} new</span> imported,{' '}
-                          {lastSearchResult.skipped} already in list. Total from Apify: {lastSearchResult.totalFromApify}.
+                          <span className="font-medium">
+                            {lastSearchResult.imported} new
+                          </span>{" "}
+                          imported, {lastSearchResult.skipped} already in list.
+                          Total from Apify: {lastSearchResult.totalFromApify}.
                         </>
                       )}
                     </p>
@@ -938,7 +1206,7 @@ export function SearchConfigPage({
                         <p className="text-xs text-vloom-muted">Saved search</p>
                         {!renaming ? (
                           <p className="text-sm font-medium text-vloom-text truncate">
-                            {resultSavedSearchName || 'Untitled'}
+                            {resultSavedSearchName || "Untitled"}
                           </p>
                         ) : (
                           <input
@@ -947,14 +1215,14 @@ export function SearchConfigPage({
                             onChange={(e) => setRenameDraft(e.target.value)}
                             onKeyDown={(e) => {
                               e.stopPropagation();
-                              if (e.key === 'Enter') {
+                              if (e.key === "Enter") {
                                 e.preventDefault();
                                 persistRename();
                               }
-                              if (e.key === 'Escape') {
+                              if (e.key === "Escape") {
                                 e.preventDefault();
                                 setRenaming(false);
-                                setRenameDraft('');
+                                setRenameDraft("");
                                 setRenameError(null);
                               }
                             }}
@@ -970,7 +1238,7 @@ export function SearchConfigPage({
                             type="button"
                             onClick={() => {
                               setRenaming(true);
-                              setRenameDraft(resultSavedSearchName || '');
+                              setRenameDraft(resultSavedSearchName || "");
                               setRenameError(null);
                             }}
                             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-vloom-border bg-vloom-surface text-vloom-text hover:bg-vloom-border/30 text-sm"
@@ -987,37 +1255,49 @@ export function SearchConfigPage({
                             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-vloom-accent text-white text-sm hover:bg-vloom-accent-hover disabled:opacity-50"
                             title="Save name"
                           >
-                            {renameSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                            {renameSaving ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Check className="w-4 h-4" />
+                            )}
                             Save
                           </button>
                         )}
                       </div>
                     </div>
-                    {renameError && <p className="mt-2 text-sm text-red-600">{renameError}</p>}
+                    {renameError && (
+                      <p className="mt-2 text-sm text-red-600">{renameError}</p>
+                    )}
                   </div>
                 )}
 
-                <SearchResultsTable key={lastSearchResult.scrapingJobId} scrapingJobId={lastSearchResult.scrapingJobId} />
+                <SearchResultsTable
+                  key={lastSearchResult.scrapingJobId}
+                  scrapingJobId={lastSearchResult.scrapingJobId}
+                />
               </>
             ) : (
               <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-500/10 dark:border-red-500/30 p-4 text-red-800 dark:text-red-200 text-sm flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 <div className="min-w-0 flex-1">
-                  <p className="whitespace-pre-line">{lastSearchResult.error}</p>
-                  {onDismissResult && /reload schema|schema cache/i.test(lastSearchResult.error) && (
-                    <button
-                      type="button"
-                      onClick={onDismissResult}
-                      className="mt-3 px-3 py-1.5 rounded-lg bg-red-200/80 dark:bg-red-500/30 hover:bg-red-300/80 dark:hover:bg-red-500/50 font-medium"
-                    >
-                      Try again
-                    </button>
-                  )}
+                  <p className="whitespace-pre-line">
+                    {lastSearchResult.error}
+                  </p>
+                  {onDismissResult &&
+                    /reload schema|schema cache/i.test(
+                      lastSearchResult.error,
+                    ) && (
+                      <button
+                        type="button"
+                        onClick={onDismissResult}
+                        className="mt-3 px-3 py-1.5 rounded-lg bg-red-200/80 dark:bg-red-500/30 hover:bg-red-300/80 dark:hover:bg-red-500/50 font-medium"
+                      >
+                        Try again
+                      </button>
+                    )}
                   {onDismissResult &&
                     /Sesión caducada|Sesión no reconocida|rechazó la sesión|Tu sesión pertenece|JWT issuer|VITE_SUPABASE_URL|sign in again|logged in/i.test(
                       lastSearchResult.error,
-                    ) && (
-                    <RefreshSessionButton onSuccess={onDismissResult} />
-                  )}
+                    ) && <RefreshSessionButton onSuccess={onDismissResult} />}
                 </div>
                 {onDismissResult && (
                   <button

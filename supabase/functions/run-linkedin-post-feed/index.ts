@@ -143,6 +143,7 @@ function buildSearchParams(input: Record<string, unknown>): {
   postedLimit: string;
   sortBy: "relevance" | "date";
   authorLocations: string[];
+  authorLocationMode: "include" | "exclude";
   maxAuthorUrlsToScrape: number;
   contentType?: string;
   authorUrls?: string[];
@@ -158,11 +159,15 @@ function buildSearchParams(input: Record<string, unknown>): {
   const sortBy = sortByRaw === "relevance" ? "relevance" : "date";
   const postedLimit = mapPostedLimitToApify(str(input.postedLimit ?? "week"));
   const authorLocations = toArray(input.authorLocations ?? input.locations ?? []);
-  const maxAuthorUrlsToScrapeRaw = input.maxAuthorUrlsToScrape ?? input.maxAuthorProfiles ?? 20;
+  const authorLocationModeRaw = str(input.authorLocationMode ?? "include").toLowerCase().trim();
+  const authorLocationMode = authorLocationModeRaw === "exclude" ? "exclude" : "include";
+  // If the user enables author location filtering, we may need to enrich many author profiles.
+  // Keep a higher default to avoid "Apify returned many but we imported only a few" situations.
+  const maxAuthorUrlsToScrapeRaw = input.maxAuthorUrlsToScrape ?? input.maxAuthorProfiles ?? 200;
   const maxAuthorUrlsToScrape =
     typeof maxAuthorUrlsToScrapeRaw === "number"
       ? maxAuthorUrlsToScrapeRaw
-      : Number(maxAuthorUrlsToScrapeRaw) || 20;
+      : Number(maxAuthorUrlsToScrapeRaw) || 200;
 
   return {
     searchQueries,
@@ -170,6 +175,7 @@ function buildSearchParams(input: Record<string, unknown>): {
     postedLimit,
     sortBy,
     authorLocations,
+    authorLocationMode,
     maxAuthorUrlsToScrape,
     contentType: str(input.contentType) || undefined,
     authorUrls: toArray(input.authorUrls ?? []),
@@ -748,17 +754,19 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        // Apply strict filter based on enriched author location.
+        // Apply location filter based on enriched author location.
+        //
+        // Important: the post search actor does not provide author location, so we enrich profiles separately.
+        // If we can't enrich a given author (missing URL, not in the capped set, failed scrape),
+        // we DO NOT drop the post — otherwise users see tiny imports despite Apify returning many items.
         postsAfterLocationFilter = posts.filter((p) => {
           const authorUrlKey = normalizeLinkedInUrlForMatching(p.authorUrl ?? undefined);
-          if (!authorUrlKey) return false;
+          if (!authorUrlKey) return true;
           const loc = (authorUrlToLocation.get(authorUrlKey) ?? "").toLowerCase();
-          if (!loc) return false;
+          if (!loc) return true;
           const matches = locationNeedles.some((needle) => loc.includes(needle));
-          if (matches) {
-            p.authorLocation = authorUrlToLocation.get(authorUrlKey) ?? undefined;
-          }
-          return matches;
+          if (matches) p.authorLocation = authorUrlToLocation.get(authorUrlKey) ?? undefined;
+          return params.authorLocationMode === "exclude" ? !matches : matches;
         });
       }
 
