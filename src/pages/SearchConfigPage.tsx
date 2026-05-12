@@ -25,8 +25,14 @@ import {
 import type { LeadSource } from "./HomePage";
 import { useLeads } from "@/hooks/useLeads";
 import { LeadsTable } from "@/components/LeadsTable";
+import {
+  getApifyApiKeyForBrowser,
+  POST_FEED_BROWSER_MAX_AUTHOR_PROFILES,
+} from "@/lib/apify";
 import { supabase } from "@/lib/supabase";
 import type { Lead } from "@/types/database";
+
+const LINKEDIN_POST_SEARCH_ACTOR_ID = "harvestapi/linkedin-post-search";
 
 // =====================================================
 // APIFY ACTOR INPUT SCHEMAS
@@ -502,7 +508,7 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       type: "locations",
       required: false,
       helpText:
-        "Optional post-filter. Uses author profile enrichment; when author location cannot be fetched, we keep the post (best-effort) to avoid losing most results.",
+        "Include mode: uses author profile location when available; if we cannot fetch it, posts are kept (best-effort). Exclude mode: drops when profile location matches; if profile location is missing, we also scan post text, headline, and company for your excluded places (e.g. India, Pakistan).",
       icon: <MapPin className="w-4 h-4" />,
       options: LOCATION_OPTIONS.map((loc) => ({ value: loc, label: loc })),
     },
@@ -511,9 +517,7 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       label: "Max author profiles to check (location filter)",
       type: "number",
       placeholder: "200",
-      defaultValue: 200,
-      helpText:
-        "Only used when you select Author locations. Higher values make Include/Exclude more accurate, but can increase cost/time because we scrape more author profiles.",
+      defaultValue: 48,
       icon: <Hash className="w-4 h-4" />,
     },
     {
@@ -542,7 +546,7 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       placeholder: "200",
       defaultValue: 200,
       helpText:
-        "Maximum number of posts to scrape per query. More posts = higher cost.",
+        "Maximum posts to fetch per query (higher = more cost). Server-side runs cap at 350 posts per query for stability; add your Apify key in Settings to run in the browser without that cap.",
       icon: <Hash className="w-4 h-4" />,
     },
     {
@@ -888,6 +892,7 @@ export function SearchConfigPage({
   const [renameDraft, setRenameDraft] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [postFeedBrowserApify, setPostFeedBrowserApify] = useState(false);
 
   const inputSchema = useMemo(
     () => ACTOR_INPUT_SCHEMAS[source.apifyActorId] || [],
@@ -904,6 +909,37 @@ export function SearchConfigPage({
     });
     setFormData(defaults);
   }, [source.apifyActorId, inputSchema]);
+
+  useEffect(() => {
+    if (source.apifyActorId !== LINKEDIN_POST_SEARCH_ACTOR_ID) {
+      setPostFeedBrowserApify(false);
+      return;
+    }
+    let cancelled = false;
+    getApifyApiKeyForBrowser().then((k) => {
+      if (!cancelled) setPostFeedBrowserApify(!!k);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [source.apifyActorId]);
+
+  useEffect(() => {
+    if (
+      source.apifyActorId !== LINKEDIN_POST_SEARCH_ACTOR_ID ||
+      !postFeedBrowserApify
+    ) {
+      return;
+    }
+    setFormData((prev) => {
+      const raw = prev.maxAuthorUrlsToScrape;
+      const n = typeof raw === "number" ? raw : Number(raw);
+      if (!Number.isFinite(n) || n === 48) {
+        return { ...prev, maxAuthorUrlsToScrape: 200 };
+      }
+      return prev;
+    });
+  }, [source.apifyActorId, postFeedBrowserApify]);
 
   const handleChange = (key: string, value: unknown) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -992,6 +1028,19 @@ export function SearchConfigPage({
     const value = formData[field.key] ?? "";
     const error = errors[field.key];
 
+    const isPostFeedAuthorCap =
+      field.key === "maxAuthorUrlsToScrape" &&
+      source.apifyActorId === LINKEDIN_POST_SEARCH_ACTOR_ID;
+    const displayHelp = field.helpText;
+    let numberMax = 500;
+    let numberPlaceholder = field.placeholder;
+    if (isPostFeedAuthorCap) {
+      // Always allow up to browser cap: native `max={48}` blocked 200 when key detection
+      // lagged or failed (Settings key still works via Edge clamp / browser run).
+      numberMax = POST_FEED_BROWSER_MAX_AUTHOR_PROFILES;
+      numberPlaceholder = "200";
+    }
+
     const baseInputClass = `
       w-full pl-10 pr-4 py-3 border rounded-xl text-vloom-text placeholder-vloom-muted
       focus:ring-2 focus:ring-vloom-accent/30 focus:border-vloom-accent transition-all bg-vloom-surface
@@ -1056,9 +1105,9 @@ export function SearchConfigPage({
               onChange={(e) =>
                 handleChange(field.key, parseInt(e.target.value) || 0)
               }
-              placeholder={field.placeholder}
+              placeholder={numberPlaceholder}
               min={1}
-              max={500}
+              max={numberMax}
               className={baseInputClass}
             />
           ) : (
@@ -1075,10 +1124,10 @@ export function SearchConfigPage({
         {/* Help text or error */}
         {error ? (
           <p className="text-sm text-red-600">{error}</p>
-        ) : field.helpText ? (
+        ) : displayHelp ? (
           <p className="text-sm text-vloom-muted flex items-start gap-1">
             <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            {field.helpText}
+            {displayHelp}
           </p>
         ) : null}
       </div>

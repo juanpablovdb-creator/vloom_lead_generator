@@ -1,5 +1,6 @@
 // Shared LinkedIn Jobs (HarvestAPI) → leads import for run-job-search + apify-job-webhook.
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { fetchApifyDatasetItemsWithRetry } from "./apifyFetchDataset.ts";
 import { computeLeadScore } from "./leadScore.ts";
 import { loadExistingLeadDedupeKeys } from "./loadExistingLeadDedupeKeys.ts";
 
@@ -170,22 +171,14 @@ async function loadBlockedCompanyNormalizedSet(
   );
 }
 
-/** Fetch dataset items from Apify (JSON array). */
+/** Fetch dataset items from Apify (JSON array), with retries on transient errors. */
 export async function fetchApifyDatasetItems(
   datasetId: string,
   apiToken: string,
 ): Promise<Record<string, unknown>[]> {
-  const dsRes = await fetch(
-    `https://api.apify.com/v2/datasets/${datasetId}/items?format=json`,
-    { headers: { Authorization: `Bearer ${apiToken}` } },
-  );
-  if (!dsRes.ok) {
-    const errBody = await dsRes.json().catch(() => ({}));
-    const msg = (errBody as { error?: { message?: string } })?.error?.message;
-    throw new Error(msg ?? `Failed to get dataset items (${dsRes.status})`);
-  }
-  const raw = await dsRes.json();
-  return Array.isArray(raw) ? raw : (raw?.items ?? raw?.results ?? []);
+  return fetchApifyDatasetItemsWithRetry(datasetId, {
+    Authorization: `Bearer ${apiToken}`,
+  });
 }
 
 /**

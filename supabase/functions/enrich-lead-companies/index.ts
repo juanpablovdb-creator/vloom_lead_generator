@@ -2,6 +2,7 @@
 // Receives: { leadIds: string[] }. Marks leads as lead + backlog are done by the client.
 // This function fetches those leads, runs harvestapi/linkedin-company, and updates enrichment_data + company_* fields.
 
+import { fetchApifyDatasetItemsWithRetry } from "../_shared/apifyFetchDataset.ts";
 import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
 import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
 import { computeLeadScore } from "../_shared/leadScore.ts";
@@ -269,13 +270,14 @@ Deno.serve(async (req: Request) => {
       }
 
       if (resolvedDatasetId) {
-        const dsRes = await fetch(
-          `${APIFY_BASE_URL}/datasets/${resolvedDatasetId}/items?format=json`,
-          { headers: { Authorization: `Bearer ${apiToken}` } }
-        );
-        if (dsRes.ok) {
-          const raw = await dsRes.json();
-          items = Array.isArray(raw) ? raw : (raw?.items ?? raw?.results ?? []);
+        try {
+          items = await fetchApifyDatasetItemsWithRetry(
+            resolvedDatasetId,
+            { Authorization: `Bearer ${apiToken}` },
+            { apiBaseUrl: APIFY_BASE_URL },
+          );
+        } catch {
+          items = [];
         }
       }
 

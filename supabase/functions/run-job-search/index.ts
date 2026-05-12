@@ -2,6 +2,7 @@
 // Receives: actorId, input?, savedSearchId?. Uses JWT for Supabase RLS.
 // Returns: { scrapingJobId, imported, skipped, totalFromApify, savedSearchId?, savedSearchName? }.
 
+import { fetchApifyDatasetItemsWithRetry } from "../_shared/apifyFetchDataset.ts";
 import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
 import { importLinkedInJobsFromItems } from "../_shared/linkedinJobImport.ts";
 import { mapWorkplaceTypesToHarvestApi } from "../_shared/mapHarvestWorkplaceTypes.ts";
@@ -378,17 +379,9 @@ Deno.serve(async (req: Request) => {
     const apifyHeaders = { Authorization: `Bearer ${apiToken}` };
     let items: Record<string, unknown>[] = [];
     if (status === "SUCCEEDED" && resolvedDatasetId) {
-      const dsRes = await fetch(
-        `${APIFY_BASE_URL}/datasets/${resolvedDatasetId}/items?format=json`,
-        { headers: apifyHeaders }
-      );
-      if (!dsRes.ok) {
-        const errBody = await dsRes.json().catch(() => ({}));
-        const msg = (errBody as { error?: { message?: string } })?.error?.message;
-        throw new Error(msg ?? `Failed to get dataset items (${dsRes.status})`);
-      }
-      const raw = await dsRes.json();
-      items = Array.isArray(raw) ? raw : (raw?.items ?? raw?.results ?? []);
+      items = await fetchApifyDatasetItemsWithRetry(resolvedDatasetId, apifyHeaders, {
+        apiBaseUrl: APIFY_BASE_URL,
+      });
     } else if ((status === "RUNNING" || status === "READY") && runId) {
       const maxWait = 600;
       const step = 5;
@@ -406,17 +399,11 @@ Deno.serve(async (req: Request) => {
         const statusData = await statusRes.json();
         const s = normalizeApifyRunStatus(statusData?.data?.status);
         if (s === "SUCCEEDED") {
-          const dsRes = await fetch(
-            `${APIFY_BASE_URL}/datasets/${statusData.data.defaultDatasetId}/items?format=json`,
-            { headers: apifyHeaders }
-          );
-          if (!dsRes.ok) {
-            const errBody = await dsRes.json().catch(() => ({}));
-            const msg = (errBody as { error?: { message?: string } })?.error?.message;
-            throw new Error(msg ?? "Failed to get dataset items");
-          }
-          const raw = await dsRes.json();
-          items = Array.isArray(raw) ? raw : (raw?.items ?? raw?.results ?? []);
+          const dsId = statusData.data.defaultDatasetId;
+          if (!dsId) throw new Error("No dataset ID from Apify run.");
+          items = await fetchApifyDatasetItemsWithRetry(dsId, apifyHeaders, {
+            apiBaseUrl: APIFY_BASE_URL,
+          });
           pollFinished = true;
           break;
         }

@@ -274,6 +274,9 @@ const LINKEDIN_JOBS_ACTOR_ID = "harvestapi/linkedin-job-search";
 /** Same as APIFY_ACTORS.LINKEDIN_POST_SEARCH — declared before APIFY_ACTORS for bypass checks. */
 const LINKEDIN_POST_ACTOR_ID = "harvestapi/linkedin-post-search";
 
+/** Cap when Post Feeds runs in the browser (user Apify key). Edge stays at 48. */
+export const POST_FEED_BROWSER_MAX_AUTHOR_PROFILES = 400;
+
 const POST_FEED_CHANNEL = "LinkedIn Post Feeds";
 const HARVEST_PROFILE_SCRAPER_MODE = "Profile details no email ($4 per 1k)";
 
@@ -602,13 +605,17 @@ function buildPostFeedParamsClient(input: Record<string, unknown>): {
     .trim();
   const authorLocationMode =
     authorLocationModeRaw === "exclude" ? "exclude" : "include";
-  // Location filtering requires extra profile scraping; keep a higher default so imports match Apify output.
+  // Location filtering requires extra profile scraping; browser path allows more than Edge (48).
   const maxAuthorUrlsToScrapeRaw =
     input.maxAuthorUrlsToScrape ?? input.maxAuthorProfiles ?? 200;
-  const maxAuthorUrlsToScrape =
+  const parsedAuthorCap =
     typeof maxAuthorUrlsToScrapeRaw === "number"
       ? maxAuthorUrlsToScrapeRaw
       : Number(maxAuthorUrlsToScrapeRaw) || 200;
+  const maxAuthorUrlsToScrape = Math.min(
+    Math.max(1, parsedAuthorCap),
+    POST_FEED_BROWSER_MAX_AUTHOR_PROFILES,
+  );
 
   return {
     searchQueries,
@@ -680,6 +687,50 @@ type PostFeedNormalized = {
   companyName?: string;
   companyLinkedinUrl?: string;
 };
+
+/** When profile location is missing, exclude-mode can match geo strings in the post body (browser path). */
+function buildPostLocationHaystackClient(p: PostFeedNormalized): string {
+  return [
+    p.text,
+    p.authorTitle,
+    p.authorName,
+    p.companyName,
+    p.authorLocation,
+  ]
+    .filter(Boolean)
+    .map((s) => String(s).toLowerCase())
+    .join(" ");
+}
+
+function escapeRegExpNeedleClient(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function haystackMatchesExcludeNeedleClient(
+  haystackLower: string,
+  needleLower: string,
+): boolean {
+  if (!needleLower) return false;
+  if (needleLower === "remote") return /\bremote\b/.test(haystackLower);
+  if (needleLower.includes(" ")) {
+    return haystackLower.includes(needleLower);
+  }
+  try {
+    return new RegExp(`\\b${escapeRegExpNeedleClient(needleLower)}\\b`).test(
+      haystackLower,
+    );
+  } catch {
+    return haystackLower.includes(needleLower);
+  }
+}
+
+function haystackMatchesAnyExcludeNeedleClient(
+  p: PostFeedNormalized,
+  needles: string[],
+): boolean {
+  const hay = buildPostLocationHaystackClient(p);
+  return needles.some((n) => haystackMatchesExcludeNeedleClient(hay, n));
+}
 
 function normalizeLinkedInPostsClient(
   items: Record<string, unknown>[],
@@ -807,19 +858,85 @@ function normalizeLinkedInPostsClient(
 
 function normalizeLinkedInUrlForMatchingClient(rawUrl?: string): string | null {
   if (!rawUrl) return null;
+  let s = rawUrl.trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) {
+    s = `https://${s}`;
+  }
   try {
-    const u = new URL(rawUrl);
+    const u = new URL(s);
+    u.protocol = "https:";
+    let host = u.hostname.replace(/^www\./i, "").toLowerCase();
+    if (host === "m.linkedin.com" || host === "mobile.linkedin.com") {
+      host = "linkedin.com";
+    } else if (/^[a-z]{2}\.linkedin\.com$/i.test(host)) {
+      host = "linkedin.com";
+    }
     u.search = "";
     u.hash = "";
-    return u.toString().replace(/\/$/, "");
+    const segments = u.pathname
+      .split("/")
+      .filter(Boolean)
+      .map((seg) => seg.toLowerCase());
+    const path = segments.length ? `/${segments.join("/")}` : "";
+    return `https://${host}${path}`;
   } catch {
-    return rawUrl.trim().replace(/\/$/, "");
+    return s.replace(/\/+$/, "").toLowerCase();
   }
+}
+
+function sanitizeUtf16StringClient(input: string): string {
+  const len = input.length;
+  let out = "";
+  for (let i = 0; i < len; i++) {
+    const cu = input.charCodeAt(i);
+    const isHigh = cu >= 0xd800 && cu <= 0xdbff;
+    const isLow = cu >= 0xdc00 && cu <= 0xdfff;
+    if (isHigh) {
+      const nextCu = i + 1 < len ? input.charCodeAt(i + 1) : null;
+      const nextIsLow = nextCu != null && nextCu >= 0xdc00 && nextCu <= 0xdfff;
+      if (nextIsLow) {
+        out += input[i] + input[i + 1];
+        i++;
+      } else {
+        out += "\uFFFD";
+      }
+    } else if (isLow) {
+      out += "\uFFFD";
+    } else {
+      out += input[i];
+    }
+  }
+  return out;
+}
+
+function sanitizeDeepStringsClient(v: unknown): unknown {
+  if (typeof v === "string") return sanitizeUtf16StringClient(v);
+  if (Array.isArray(v)) return v.map((x) => sanitizeDeepStringsClient(x));
+  if (v && typeof v === "object" && !(v instanceof Date)) {
+    const obj = v as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(obj)) {
+      next[k] = sanitizeDeepStringsClient(val) as unknown;
+    }
+    return next;
+  }
+  return v;
+}
+
+function truncateUtf16SafeClient(input: string, maxCodeUnits: number): string {
+  const s = sanitizeUtf16StringClient(input);
+  if (s.length <= maxCodeUnits) return s;
+  let end = maxCodeUnits;
+  const cu = s.charCodeAt(end - 1);
+  if (cu >= 0xd800 && cu <= 0xdbff) end--;
+  return sanitizeUtf16StringClient(s.slice(0, end)) + "…";
 }
 
 function safeJsonMini(value: Record<string, unknown>): Record<string, unknown> {
   try {
-    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+    const s = sanitizeDeepStringsClient(value) as Record<string, unknown>;
+    return JSON.parse(JSON.stringify(s)) as Record<string, unknown>;
   } catch {
     return { source: "linkedin_post_feed" };
   }
@@ -1001,7 +1118,7 @@ async function runLinkedInPostFeedBrowser(options: {
       );
       const maxAuthorUrlsToScrape = Math.max(
         1,
-        params.maxAuthorUrlsToScrape || 20,
+        params.maxAuthorUrlsToScrape ?? 200,
       );
       const uniqueAuthorUrls = uniqueAuthorUrlsAll.slice(
         0,
@@ -1017,8 +1134,14 @@ async function runLinkedInPostFeedBrowser(options: {
         const profileItems =
           await client.runLinkedInHarvestProfileScraper(batchUrls);
         for (const p of profileItems) {
+          const rawProfileUrl =
+            pStr(p?.linkedinUrl) ||
+            pStr(p?.url) ||
+            pStr(p?.profileUrl) ||
+            pStr(p?.linkedin_url) ||
+            pStr(p?.profile_url);
           const linkedinUrl = normalizeLinkedInUrlForMatchingClient(
-            pStr(p?.linkedinUrl) || undefined,
+            rawProfileUrl || undefined,
           );
           const locObj = p?.location as Record<string, unknown> | undefined;
           const locationStr =
@@ -1029,27 +1152,49 @@ async function runLinkedInPostFeedBrowser(options: {
           const parsedLocation =
             (parsedText?.text as string | undefined) ??
             (parsedText?.city as string | undefined) ??
+            (parsedText?.country as string | undefined) ??
             undefined;
-          const finalLoc = (locationStr || parsedLocation || "").toString();
+          let finalLoc = (locationStr || parsedLocation || "").toString().trim();
+          if (!finalLoc && typeof p.location === "string") {
+            finalLoc = p.location.trim();
+          }
           if (linkedinUrl && finalLoc)
             authorUrlToLocation.set(linkedinUrl, finalLoc);
         }
       }
 
-      // Do not drop posts when we couldn't enrich the author's location (URL missing / capped / scrape failed).
-      // Otherwise users see tiny imports even though Apify returned many results.
+      // Exclude: profile location when available; else scan post text so India/PK etc. still drop without a scrape.
+      // Include: keep unknown-location posts; require profile match when loc exists.
       postsAfterLocationFilter = posts.filter((p) => {
         const authorUrlKey = normalizeLinkedInUrlForMatchingClient(
           p.authorUrl ?? undefined,
         );
+        const locRaw = authorUrlKey
+          ? (authorUrlToLocation.get(authorUrlKey) ?? "")
+          : "";
+        const loc = locRaw.toLowerCase();
+        const profileMatches = loc
+          ? locationNeedles.some((needle) => loc.includes(needle))
+          : false;
+
+        if (params.authorLocationMode === "exclude") {
+          if (loc && authorUrlKey) {
+            if (profileMatches) {
+              p.authorLocation = authorUrlToLocation.get(authorUrlKey) ?? undefined;
+            }
+            return !profileMatches;
+          }
+          if (haystackMatchesAnyExcludeNeedleClient(p, locationNeedles))
+            return false;
+          return true;
+        }
+
         if (!authorUrlKey) return true;
-        const loc = (authorUrlToLocation.get(authorUrlKey) ?? "").toLowerCase();
         if (!loc) return true;
-        const matches = locationNeedles.some((needle) => loc.includes(needle));
-        if (matches) {
+        if (profileMatches) {
           p.authorLocation = authorUrlToLocation.get(authorUrlKey) ?? undefined;
         }
-        return params.authorLocationMode === "exclude" ? !matches : matches;
+        return profileMatches;
       });
     }
 
@@ -1065,6 +1210,12 @@ async function runLinkedInPostFeedBrowser(options: {
     });
 
     const leadsToInsert = newPosts.map((post) => {
+      const descSan = sanitizeUtf16StringClient(post.text ?? "");
+      const jobDescription =
+        descSan.length > 14000
+          ? truncateUtf16SafeClient(descSan, 14000)
+          : descSan || null;
+
       const enrichment_data = safeJsonMini({
         source: "linkedin_post_feed",
         raw: post,
@@ -1074,47 +1225,57 @@ async function runLinkedInPostFeedBrowser(options: {
         company_location: null,
         company_size: null,
         company_funding: null,
-        job_description: post.text ?? null,
+        job_description: jobDescription,
         notes: null,
         enrichment_data,
       });
+      const rawTitle = sanitizeUtf16StringClient(post.text?.trim() ?? "");
       const titleFallback =
-        post.text && post.text.trim().length > 0
-          ? post.text.trim().slice(0, 80) +
-            (post.text.trim().length > 80 ? "…" : "")
-          : "LinkedIn Post";
+        rawTitle.length > 0 ? truncateUtf16SafeClient(rawTitle, 80) : "LinkedIn Post";
 
-      return {
+      return sanitizeDeepStringsClient({
         user_id: user.id,
         is_shared: false,
         scraping_job_id: scrapingJobId,
-        job_external_id: post.externalId ?? null,
+        job_external_id: post.externalId
+          ? sanitizeUtf16StringClient(String(post.externalId))
+          : null,
         is_marked_as_lead: false,
         job_title: titleFallback,
-        job_description: post.text ?? null,
-        job_url: post.url ?? null,
+        job_description: jobDescription,
+        job_url: post.url ? sanitizeUtf16StringClient(post.url) : null,
         job_source: "linkedin_post_feed",
         job_location: null,
         job_salary_range: null,
         job_posted_at: post.postedAt ?? null,
-        company_name: post.companyName ?? null,
+        company_name: post.companyName
+          ? sanitizeUtf16StringClient(post.companyName)
+          : null,
         company_url: null,
-        company_linkedin_url: post.companyLinkedinUrl ?? null,
+        company_linkedin_url: post.companyLinkedinUrl
+          ? sanitizeUtf16StringClient(post.companyLinkedinUrl)
+          : null,
         company_description: null,
         company_size: null,
         company_location: null,
         company_industry: null,
         company_funding: null,
-        contact_name: post.authorName ?? null,
-        contact_title: post.authorTitle ?? null,
+        contact_name: post.authorName
+          ? sanitizeUtf16StringClient(post.authorName)
+          : null,
+        contact_title: post.authorTitle
+          ? sanitizeUtf16StringClient(post.authorTitle)
+          : null,
         contact_email: null,
-        contact_linkedin_url: post.authorUrl ?? null,
+        contact_linkedin_url: post.authorUrl
+          ? sanitizeUtf16StringClient(post.authorUrl)
+          : null,
         status: "backlog" as const,
         score,
         enrichment_data,
         tags: [] as string[],
         channel: POST_FEED_CHANNEL,
-      };
+      }) as Record<string, unknown>;
     });
 
     if (leadsToInsert.length === 0) {
@@ -1191,6 +1352,16 @@ async function runLinkedInPostFeedBrowser(options: {
   }
 }
 
+/** Supabase Edge can OOM on large Post Feeds imports; surface a clearer message. */
+function formatPostFeedEdgeComputeError(original: string): string {
+  if (!/compute resources|not enough compute/i.test(original)) return original;
+  return [
+    "Post Feeds hit Supabase Edge limits (memory or CPU).",
+    "Fix: add your Apify API key in Settings so the search runs in your browser (more headroom), or lower Max posts / simplify author-location filtering.",
+    `Detail: ${original}`,
+  ].join(" ");
+}
+
 /**
  * Run LinkedIn Post Feed search via Edge Function (API key stays in Edge Function Secrets).
  * With a browser Apify key, runs locally to avoid Edge JWT gateway issues (same pattern as LinkedIn Jobs).
@@ -1246,7 +1417,7 @@ export async function runLinkedInPostFeedViaEdge(options: {
             );
           }
         }
-        throw new Error(errStr);
+        throw new Error(formatPostFeedEdgeComputeError(errStr));
       }
       if (body?.scrapingJobId == null)
         throw new Error("Invalid response from run-linkedin-post-feed.");
@@ -1283,7 +1454,7 @@ export async function runLinkedInPostFeedViaEdge(options: {
           );
         }
       }
-      throw new Error(msg);
+      throw new Error(formatPostFeedEdgeComputeError(msg));
     }
 
     const httpRes = getHttpResponseFromInvokeError(error);
@@ -1306,7 +1477,11 @@ export async function runLinkedInPostFeedViaEdge(options: {
           );
         }
       }
-      throw new Error(message || `run-linkedin-post-feed returned ${status}`);
+      throw new Error(
+        formatPostFeedEdgeComputeError(
+          message || `run-linkedin-post-feed returned ${status}`,
+        ),
+      );
     }
 
     if (error instanceof FunctionsHttpError) {
@@ -1325,7 +1500,11 @@ export async function runLinkedInPostFeedViaEdge(options: {
           );
         }
       }
-      throw new Error(message || `run-linkedin-post-feed returned ${status}`);
+      throw new Error(
+        formatPostFeedEdgeComputeError(
+          message || `run-linkedin-post-feed returned ${status}`,
+        ),
+      );
     }
 
     const loose = error instanceof Error ? error.message : String(error);
@@ -1343,7 +1522,11 @@ export async function runLinkedInPostFeedViaEdge(options: {
       }
     }
 
-    throw new Error(error instanceof Error ? error.message : String(error));
+    throw new Error(
+      formatPostFeedEdgeComputeError(
+        error instanceof Error ? error.message : String(error),
+      ),
+    );
   }
 
   throw new Error("run-linkedin-post-feed: session retry exhausted.");
@@ -1938,6 +2121,38 @@ function parseApifyError(errText: string): string {
   return errText;
 }
 
+const APIFY_DATASET_FETCH_MAX_ATTEMPTS = 6;
+
+/** Retries on 429 / 502 / 503 / 504 (Apify gateway hiccups). */
+async function fetchApifyDatasetJsonWithRetry(
+  url: string,
+  headers: Record<string, string>,
+): Promise<unknown> {
+  for (let attempt = 1; attempt <= APIFY_DATASET_FETCH_MAX_ATTEMPTS; attempt++) {
+    const response = await fetch(url, { headers });
+    if (response.ok) {
+      return response.json();
+    }
+    const status = response.status;
+    const retryable = status === 429 || status === 502 || status === 503 || status === 504;
+    const errText = await response.text();
+    if (!retryable || attempt === APIFY_DATASET_FETCH_MAX_ATTEMPTS) {
+      const hint =
+        retryable && attempt === APIFY_DATASET_FETCH_MAX_ATTEMPTS
+          ? " Apify's API was temporarily unavailable; wait a minute and try again."
+          : "";
+      throw new Error(
+        (parseApifyError(errText) || `Failed to get dataset items (${status})`) + hint,
+      );
+    }
+    const delayMs =
+      Math.min(12_000, 500 * 2 ** (attempt - 1)) +
+      Math.floor(Math.random() * 400);
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error("Failed to get dataset items");
+}
+
 export class ApifyClient {
   private apiKey: string;
 
@@ -1999,19 +2214,9 @@ export class ApifyClient {
 
   /** Get dataset items (JSON). */
   async getDatasetItems<T = unknown>(datasetId: string): Promise<T[]> {
-    const response = await fetch(
-      `${APIFY_BASE_URL}/datasets/${datasetId}/items?format=json`,
-      { headers: this.headers },
-    );
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(
-        parseApifyError(errText) || "Failed to get dataset items",
-      );
-    }
-
-    return response.json();
+    const url = `${APIFY_BASE_URL}/datasets/${datasetId}/items?format=json`;
+    const data = await fetchApifyDatasetJsonWithRetry(url, this.headers);
+    return data as T[];
   }
 
   /** Poll run until terminal status or timeout. Returns final status and datasetId. */

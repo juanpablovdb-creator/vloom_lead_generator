@@ -58,6 +58,10 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] LinkedIn Post Feeds: ejecutar `harvestapi/linkedin-post-search` y soportar Saved Searches → seleccionar → Send to leads
 - [x] Post Feeds: filtro `authorLocations` aplica ubicacion del autor vía `harvestapi/linkedin-profile-scraper`
 - [x] Post Feeds: filtro por país del autor (lista completa) + modo Include/Exclude
+- [x] Post Feeds: Exclude — si falta ubicación del perfil, filtrar también por texto/headline/compañía del post (India/PK en anuncios sin scrape)
+- [x] Post Feeds: normalizar URL de perfil (`www`/subdominio regional/`m.`) para que el mapa autor→ubicación coincida con el `authorUrl` del post
+- [x] Apify: reintentos con backoff al obtener items de dataset (502/503/504/429) en Edge y cliente
+- [x] Post Feeds: hasta 400 perfiles con clave Apify (navegador); UI detecta clave y default 200
 - [x] Post Feeds: normalizar `postedAt` del actor para evitar `"[object Object]"` en `job_posted_at` (timestamp)
 - [x] CRM: default “Marked leads only” + validar update en Send to leads (Post Feeds / Saved searches visibles en Backlog)
 - [x] LinkedIn Job search: canal por defecto (backfill + Send to leads), filtro Remote/workplace hacia Apify, dedupe `job_external_id` + enrich personas más robusto

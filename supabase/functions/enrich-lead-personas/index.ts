@@ -2,6 +2,7 @@
 // Receives: { leadIds: string[] }. Fetches leads and user's active personas; for each distinct company
 // runs the actor with company URL + persona filters; creates one lead row per person found (same company, new contact).
 
+import { fetchApifyDatasetItemsWithRetry } from "../_shared/apifyFetchDataset.ts";
 import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
 import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
@@ -342,15 +343,18 @@ Deno.serve(async (req: Request) => {
 
       if (status !== "SUCCEEDED" || !datasetId) continue;
 
-      const dsRes = await fetch(`${APIFY_BASE_URL}/datasets/${datasetId}/items?format=json`, {
-        headers: { Authorization: `Bearer ${apiToken}` },
-      });
-      if (!dsRes.ok) continue;
+      let items: Record<string, unknown>[] = [];
+      try {
+        items = await fetchApifyDatasetItemsWithRetry(
+          datasetId,
+          { Authorization: `Bearer ${apiToken}` },
+          { apiBaseUrl: APIFY_BASE_URL },
+        );
+      } catch {
+        continue;
+      }
 
-      const raw = await dsRes.json();
-      const items = Array.isArray(raw) ? raw : (raw?.items ?? raw?.results ?? []);
-
-      for (const item of items as Record<string, unknown>[]) {
+      for (const item of items) {
         const contactLinkedIn = str(item.linkedinUrl ?? item.linkedin_url);
         if (!contactLinkedIn) continue;
         // Job listing URLs are not people; including them caused bad rows and unique conflicts.

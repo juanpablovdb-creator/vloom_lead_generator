@@ -2,6 +2,7 @@
 // Receives: input? savedSearchId?. Uses JWT for Supabase RLS.
 // Returns: { scrapingJobId, imported, skipped, totalFromApify, savedSearchId?, savedSearchName? }.
 
+import { fetchApifyDatasetItemsWithRetry } from "../_shared/apifyFetchDataset.ts";
 import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
 import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
 import { computeLeadScore } from "../_shared/leadScore.ts";
@@ -11,6 +12,12 @@ const APIFY_BASE_URL = "https://api.apify.com/v2";
 const LINKEDIN_POSTS_ACTOR = "harvestapi/linkedin-post-search";
 const LINKEDIN_PROFILE_SCRAPER_ACTOR = "harvestapi/linkedin-profile-scraper";
 const LINKEDIN_PROFILE_SCRAPER_MODE = "Profile details no email ($4 per 1k)";
+
+/** Supabase Edge has tight CPU/memory; profile scraping + huge inserts OOM easily. */
+const EDGE_MAX_AUTHOR_PROFILES = 48;
+const EDGE_LEADS_INSERT_BATCH = 60;
+/** Large post payloads (many long texts) can exhaust the Edge isolate. */
+const EDGE_MAX_POSTS = 350;
 
 /** API docs: actorId is username~actor-name (tilde). Normalize slash to tilde for URL. */
 function toApifyActorId(actorId: string): string {
@@ -68,54 +75,62 @@ function extractPostedAtISO(v: unknown): string | undefined {
   return undefined;
 }
 
+/** Invalid UTF-16 surrogates in scraped text break Postgres JSONB (22P02). */
+function sanitizeUtf16String(input: string): string {
+  const len = input.length;
+  let out = "";
+  for (let i = 0; i < len; i++) {
+    const cu = input.charCodeAt(i);
+    const isHigh = cu >= 0xd800 && cu <= 0xdbff;
+    const isLow = cu >= 0xdc00 && cu <= 0xdfff;
+
+    if (isHigh) {
+      const nextCu = i + 1 < len ? input.charCodeAt(i + 1) : null;
+      const nextIsLow = nextCu != null && nextCu >= 0xdc00 && nextCu <= 0xdfff;
+      if (nextIsLow) {
+        out += input[i] + input[i + 1];
+        i++;
+      } else {
+        out += "\uFFFD";
+      }
+    } else if (isLow) {
+      out += "\uFFFD";
+    } else {
+      out += input[i];
+    }
+  }
+  return out;
+}
+
+function sanitizeDeepStrings(v: unknown): unknown {
+  if (typeof v === "string") return sanitizeUtf16String(v);
+  if (Array.isArray(v)) return v.map((x) => sanitizeDeepStrings(x));
+  if (v && typeof v === "object" && !(v instanceof Date)) {
+    const obj = v as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(obj)) {
+      next[k] = sanitizeDeepStrings(val);
+    }
+    return next;
+  }
+  return v;
+}
+
+/** `slice` can split a surrogate pair; Postgres rejects the result in JSON/text. */
+function truncateUtf16Safe(input: string, maxCodeUnits: number): string {
+  const s = sanitizeUtf16String(input);
+  if (s.length <= maxCodeUnits) return s;
+  let end = maxCodeUnits;
+  const cu = s.charCodeAt(end - 1);
+  if (cu >= 0xd800 && cu <= 0xdbff) end--;
+  return sanitizeUtf16String(s.slice(0, end)) + "…";
+}
+
 function safeJson<T>(value: T, fallback: T): T {
   // Ensures the value is JSON-serializable.
   // If it fails (circular / BigInt / unexpected), return a safe fallback to avoid DB JSON parse errors.
   try {
-    // Sanitize invalid UTF-16 surrogate sequences (can happen in scraped HTML/text),
-    // which Postgres JSONB parser rejects with: "Unicode low surrogate must follow a high surrogate".
-    const sanitizeUnicodeString = (input: string): string => {
-      const len = input.length;
-      let out = "";
-      for (let i = 0; i < len; i++) {
-        const cu = input.charCodeAt(i);
-        const isHigh = cu >= 0xd800 && cu <= 0xdbff;
-        const isLow = cu >= 0xdc00 && cu <= 0xdfff;
-
-        if (isHigh) {
-          const nextCu = i + 1 < len ? input.charCodeAt(i + 1) : null;
-          const nextIsLow = nextCu != null && nextCu >= 0xdc00 && nextCu <= 0xdfff;
-          if (nextIsLow) {
-            out += input[i] + input[i + 1];
-            i++;
-          } else {
-            out += "\uFFFD";
-          }
-        } else if (isLow) {
-          // Low surrogate without a valid preceding high surrogate.
-          out += "\uFFFD";
-        } else {
-          out += input[i];
-        }
-      }
-      return out;
-    };
-
-    const sanitizeDeep = (v: unknown): unknown => {
-      if (typeof v === "string") return sanitizeUnicodeString(v);
-      if (Array.isArray(v)) return v.map((x) => sanitizeDeep(x));
-      if (v && typeof v === "object") {
-        const obj = v as Record<string, unknown>;
-        const next: Record<string, unknown> = {};
-        for (const [k, val] of Object.entries(obj)) {
-          next[k] = sanitizeDeep(val);
-        }
-        return next;
-      }
-      return v;
-    };
-
-    const sanitized = sanitizeDeep(value) as T;
+    const sanitized = sanitizeDeepStrings(value) as T;
     return JSON.parse(JSON.stringify(sanitized)) as T;
   } catch {
     return fallback;
@@ -154,20 +169,25 @@ function buildSearchParams(input: Record<string, unknown>): {
 } {
   const searchQueries = toArray(input.searchQueries ?? input.keywords ?? input.jobTitles ?? input.query ?? []);
   const maxPostsRaw = input.maxPosts ?? input.maxItems ?? 200;
-  const maxPosts = typeof maxPostsRaw === "number" ? maxPostsRaw : Number(maxPostsRaw) || 200;
+  const maxPostsParsed =
+    typeof maxPostsRaw === "number" ? maxPostsRaw : Number(maxPostsRaw) || 200;
+  const maxPosts = Math.min(Math.max(1, maxPostsParsed), EDGE_MAX_POSTS);
   const sortByRaw = str(input.sortBy ?? input.sort ?? "date").toLowerCase();
   const sortBy = sortByRaw === "relevance" ? "relevance" : "date";
   const postedLimit = mapPostedLimitToApify(str(input.postedLimit ?? "week"));
   const authorLocations = toArray(input.authorLocations ?? input.locations ?? []);
   const authorLocationModeRaw = str(input.authorLocationMode ?? "include").toLowerCase().trim();
   const authorLocationMode = authorLocationModeRaw === "exclude" ? "exclude" : "include";
-  // If the user enables author location filtering, we may need to enrich many author profiles.
-  // Keep a higher default to avoid "Apify returned many but we imported only a few" situations.
-  const maxAuthorUrlsToScrapeRaw = input.maxAuthorUrlsToScrape ?? input.maxAuthorProfiles ?? 200;
-  const maxAuthorUrlsToScrape =
+  const maxAuthorUrlsToScrapeRaw =
+    input.maxAuthorUrlsToScrape ?? input.maxAuthorProfiles ?? EDGE_MAX_AUTHOR_PROFILES;
+  const parsed =
     typeof maxAuthorUrlsToScrapeRaw === "number"
       ? maxAuthorUrlsToScrapeRaw
-      : Number(maxAuthorUrlsToScrapeRaw) || 200;
+      : Number(maxAuthorUrlsToScrapeRaw) || EDGE_MAX_AUTHOR_PROFILES;
+  const maxAuthorUrlsToScrape = Math.min(
+    Math.max(1, parsed),
+    EDGE_MAX_AUTHOR_PROFILES,
+  );
 
   return {
     searchQueries,
@@ -198,6 +218,62 @@ type PostResult = {
   companyName?: string;
   companyLinkedinUrl?: string;
 };
+
+/** When profile location is missing, exclude-mode can still match common geo strings in the post body. */
+function buildPostLocationHaystack(p: PostResult): string {
+  return [
+    p.text,
+    p.authorTitle,
+    p.authorName,
+    p.companyName,
+    p.authorLocation,
+  ]
+    .filter(Boolean)
+    .map((s) => String(s).toLowerCase())
+    .join(" ");
+}
+
+function escapeRegExpNeedle(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function haystackMatchesExcludeNeedle(haystackLower: string, needleLower: string): boolean {
+  if (!needleLower) return false;
+  if (needleLower === "remote") return /\bremote\b/.test(haystackLower);
+  if (needleLower.includes(" ")) {
+    return haystackLower.includes(needleLower);
+  }
+  try {
+    return new RegExp(`\\b${escapeRegExpNeedle(needleLower)}\\b`).test(haystackLower);
+  } catch {
+    return haystackLower.includes(needleLower);
+  }
+}
+
+function haystackMatchesAnyExcludeNeedle(p: PostResult, needles: string[]): boolean {
+  const hay = buildPostLocationHaystack(p);
+  return needles.some((n) => haystackMatchesExcludeNeedle(hay, n));
+}
+
+/** Smaller JSON in `enrichment_data` to avoid Edge OOM on bulk insert. Full post text stays in `job_description`. */
+function slimPostForEdgeStorage(post: PostResult): Record<string, unknown> {
+  const text = sanitizeUtf16String(post.text ?? "");
+  const textOut = text.length > 4000 ? truncateUtf16Safe(text, 4000) : text || undefined;
+  return {
+    externalId: post.externalId ? sanitizeUtf16String(String(post.externalId)) : undefined,
+    url: post.url ? sanitizeUtf16String(post.url) : undefined,
+    postedAt: post.postedAt ? sanitizeUtf16String(String(post.postedAt)) : undefined,
+    authorName: post.authorName ? sanitizeUtf16String(post.authorName) : undefined,
+    authorTitle: post.authorTitle ? sanitizeUtf16String(post.authorTitle) : undefined,
+    authorUrl: post.authorUrl ? sanitizeUtf16String(post.authorUrl) : undefined,
+    authorLocation: post.authorLocation ? sanitizeUtf16String(post.authorLocation) : undefined,
+    companyName: post.companyName ? sanitizeUtf16String(post.companyName) : undefined,
+    companyLinkedinUrl: post.companyLinkedinUrl
+      ? sanitizeUtf16String(post.companyLinkedinUrl)
+      : undefined,
+    text: textOut,
+  };
+}
 
 /** LinkedIn headlines are often "Title at Company" — actor sometimes omits structured companyName. */
 function inferCompanyFromHeadline(headline: string): string | undefined {
@@ -335,14 +411,30 @@ function normalizeLinkedInPosts(items: Record<string, unknown>[]): PostResult[] 
 
 function normalizeLinkedInUrlForMatching(rawUrl?: string): string | null {
   if (!rawUrl) return null;
+  let s = rawUrl.trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) {
+    s = `https://${s}`;
+  }
   try {
-    const u = new URL(rawUrl);
+    const u = new URL(s);
+    u.protocol = "https:";
+    let host = u.hostname.replace(/^www\./i, "").toLowerCase();
+    if (host === "m.linkedin.com" || host === "mobile.linkedin.com") {
+      host = "linkedin.com";
+    } else if (/^[a-z]{2}\.linkedin\.com$/i.test(host)) {
+      host = "linkedin.com";
+    }
     u.search = "";
     u.hash = "";
-    // Remove trailing slash
-    return u.toString().replace(/\/$/, "");
+    const segments = u.pathname
+      .split("/")
+      .filter(Boolean)
+      .map((seg) => seg.toLowerCase());
+    const path = segments.length ? `/${segments.join("/")}` : "";
+    return `https://${host}${path}`;
   } catch {
-    return rawUrl.trim().replace(/\/$/, "");
+    return s.replace(/\/+$/, "").toLowerCase();
   }
 }
 
@@ -566,14 +658,9 @@ Deno.serve(async (req: Request) => {
       const apifyHeaders = { Authorization: `Bearer ${apiToken}` };
       let items: Record<string, unknown>[] = [];
       const getDatasetItems = async (dsId: string) => {
-        const dsRes = await fetch(`${APIFY_BASE_URL}/datasets/${dsId}/items?format=json`, { headers: apifyHeaders });
-        if (!dsRes.ok) {
-          const errBody = await dsRes.json().catch(() => ({}));
-          const msg = (errBody as { error?: { message?: string } })?.error?.message;
-          throw new Error(msg ?? `Failed to get dataset items (${dsRes.status})`);
-        }
-        const raw = await dsRes.json();
-        items = Array.isArray(raw) ? raw : (raw?.items ?? raw?.results ?? []);
+        items = await fetchApifyDatasetItemsWithRetry(dsId, apifyHeaders, {
+          apiBaseUrl: APIFY_BASE_URL,
+        });
       };
 
       if (status === "SUCCEEDED" && datasetId) {
@@ -637,17 +724,17 @@ Deno.serve(async (req: Request) => {
               .filter(Boolean) as string[]
           )
         );
-        // Cap para evitar que el run exceda el tiempo del Edge Function.
-        const maxAuthorUrlsToScrape = Math.max(1, params.maxAuthorUrlsToScrape || 20);
+        // `maxAuthorUrlsToScrape` is already capped in buildSearchParams (EDGE_MAX_AUTHOR_PROFILES).
+        const maxAuthorUrlsToScrape = Math.max(1, params.maxAuthorUrlsToScrape);
         const uniqueAuthorUrls = uniqueAuthorUrlsAll.slice(0, maxAuthorUrlsToScrape);
 
         const authorUrlToLocation = new Map<string, string>();
-        const batchSize = 10; // throttle para no explotar el edge runtime
+        const batchSize = 8; // smaller batches = smaller Apify JSON payloads per step
 
         const actorIdForUrl = toApifyActorId(LINKEDIN_PROFILE_SCRAPER_ACTOR);
 
         const pollAndFetchDatasetItems = async (runId: string, datasetIdFallback?: string) => {
-          const maxWait = 600;
+          const maxWait = 300;
           const step = 5;
           let resolvedDatasetId = datasetIdFallback;
 
@@ -669,18 +756,9 @@ Deno.serve(async (req: Request) => {
           }
 
           if (!resolvedDatasetId) throw new Error("No dataset ID from profile scraping run.");
-          const dsRes = await fetch(
-            `${APIFY_BASE_URL}/datasets/${resolvedDatasetId}/items?format=json`,
-            { headers: apifyHeaders }
-          );
-          if (!dsRes.ok) {
-            const errBody = await dsRes.json().catch(() => ({}));
-            const msg = (errBody as { error?: { message?: string } })?.error?.message;
-            throw new Error(msg ?? `Failed to get dataset items (${dsRes.status})`);
-          }
-          const raw = await dsRes.json();
-          const itemsArr = Array.isArray(raw) ? raw : raw?.items ?? raw?.results ?? [];
-          return itemsArr as Record<string, unknown>[];
+          return fetchApifyDatasetItemsWithRetry(resolvedDatasetId, apifyHeaders, {
+            apiBaseUrl: APIFY_BASE_URL,
+          });
         };
 
         for (let i = 0; i < uniqueAuthorUrls.length; i += batchSize) {
@@ -727,46 +805,65 @@ Deno.serve(async (req: Request) => {
           let profileItems: Record<string, unknown>[] = [];
           if (status === "SUCCEEDED" && datasetId) {
             const apifyHeaders = { Authorization: `Bearer ${apiToken}` };
-            const dsRes = await fetch(
-              `${APIFY_BASE_URL}/datasets/${datasetId}/items?format=json`,
-              { headers: apifyHeaders }
-            );
-            if (!dsRes.ok) {
-              const errBody = await dsRes.json().catch(() => ({}));
-              const msg = (errBody as { error?: { message?: string } })?.error?.message;
-              throw new Error(msg ?? `Failed to get dataset items (${dsRes.status})`);
-            }
-            const raw = await dsRes.json();
-            profileItems = (Array.isArray(raw) ? raw : raw?.items ?? raw?.results ?? []) as Record<string, unknown>[];
+            profileItems = await fetchApifyDatasetItemsWithRetry(datasetId, apifyHeaders, {
+              apiBaseUrl: APIFY_BASE_URL,
+            });
           } else if (runId) {
             profileItems = await pollAndFetchDatasetItems(runId, datasetId);
           }
 
           for (const p of profileItems) {
-            const linkedinUrl = normalizeLinkedInUrlForMatching(str(p?.linkedinUrl) || undefined);
-            const locationStr =
-              (p?.location as Record<string, unknown> | undefined)?.linkedinText as string | undefined ?? undefined;
-            const parsedText = (p?.location as Record<string, unknown> | undefined)?.parsed as Record<string, unknown> | undefined;
+            const rawProfileUrl =
+              str(p?.linkedinUrl) ||
+              str(p?.url) ||
+              str(p?.profileUrl) ||
+              str(p?.linkedin_url) ||
+              str(p?.profile_url);
+            const linkedinUrl = normalizeLinkedInUrlForMatching(rawProfileUrl || undefined);
+            const locObj = p?.location as Record<string, unknown> | undefined;
+            const locationStr = (locObj?.linkedinText as string | undefined) ?? undefined;
+            const parsedText = locObj?.parsed as Record<string, unknown> | undefined;
             const parsedLocation =
-              (parsedText?.text as string | undefined) ?? (parsedText?.city as string | undefined) ?? undefined;
-            const finalLoc = (locationStr || parsedLocation || "").toString();
+              (parsedText?.text as string | undefined) ??
+              (parsedText?.city as string | undefined) ??
+              (parsedText?.country as string | undefined) ??
+              undefined;
+            let finalLoc = (locationStr || parsedLocation || "").toString().trim();
+            if (!finalLoc && typeof p.location === "string") {
+              finalLoc = p.location.trim();
+            }
             if (linkedinUrl && finalLoc) authorUrlToLocation.set(linkedinUrl, finalLoc);
           }
         }
 
-        // Apply location filter based on enriched author location.
-        //
-        // Important: the post search actor does not provide author location, so we enrich profiles separately.
-        // If we can't enrich a given author (missing URL, not in the capped set, failed scrape),
-        // we DO NOT drop the post — otherwise users see tiny imports despite Apify returning many items.
+        // Apply location filter: profile location when available; in **exclude** mode also scan post text
+        // so India/PK (etc.) posts drop when we never scraped that author (cap) or profile had no location.
         postsAfterLocationFilter = posts.filter((p) => {
           const authorUrlKey = normalizeLinkedInUrlForMatching(p.authorUrl ?? undefined);
+          const locRaw = authorUrlKey ? (authorUrlToLocation.get(authorUrlKey) ?? "") : "";
+          const loc = locRaw.toLowerCase();
+          const profileMatches = loc
+            ? locationNeedles.some((needle) => loc.includes(needle))
+            : false;
+
+          if (params.authorLocationMode === "exclude") {
+            if (loc && authorUrlKey) {
+              if (profileMatches) {
+                p.authorLocation = authorUrlToLocation.get(authorUrlKey) ?? undefined;
+              }
+              return !profileMatches;
+            }
+            if (haystackMatchesAnyExcludeNeedle(p, locationNeedles)) return false;
+            return true;
+          }
+
+          // include: keep unknown-location posts (best-effort); require profile match when loc exists
           if (!authorUrlKey) return true;
-          const loc = (authorUrlToLocation.get(authorUrlKey) ?? "").toLowerCase();
           if (!loc) return true;
-          const matches = locationNeedles.some((needle) => loc.includes(needle));
-          if (matches) p.authorLocation = authorUrlToLocation.get(authorUrlKey) ?? undefined;
-          return params.authorLocationMode === "exclude" ? !matches : matches;
+          if (profileMatches) {
+            p.authorLocation = authorUrlToLocation.get(authorUrlKey) ?? undefined;
+          }
+          return profileMatches;
         });
       }
 
@@ -785,56 +882,61 @@ Deno.serve(async (req: Request) => {
       });
 
       const leadsToInsert = newPosts.map((post) => {
+        const descText = sanitizeUtf16String(post.text ?? "");
+        const jobDescription =
+          descText.length > 14000 ? truncateUtf16Safe(descText, 14000) : descText || null;
+
         const enrichment_data: Record<string, unknown> = safeJson({
           source: "linkedin_post_feed",
-          raw: post,
+          raw: slimPostForEdgeStorage(post),
         }, { source: "linkedin_post_feed" } as Record<string, unknown>);
         const score = computeLeadScore({
           job_location: null,
           company_location: null,
           company_size: null,
           company_funding: null,
-          job_description: post.text ?? null,
+          job_description: jobDescription,
           notes: null,
           enrichment_data,
         });
 
+        const rawTitle = sanitizeUtf16String(post.text?.trim() ?? "");
         const titleFallback =
-          post.text && post.text.trim().length > 0
-            ? post.text.trim().slice(0, 80) + (post.text.trim().length > 80 ? "…" : "")
-            : "LinkedIn Post";
+          rawTitle.length > 0 ? truncateUtf16Safe(rawTitle, 80) : "LinkedIn Post";
 
-        return {
+        return sanitizeDeepStrings({
           user_id: user.id,
           is_shared: false,
           scraping_job_id: scrapingJobId,
-          job_external_id: post.externalId ?? null,
+          job_external_id: post.externalId ? sanitizeUtf16String(String(post.externalId)) : null,
           is_marked_as_lead: false,
           job_title: titleFallback,
-          job_description: post.text ?? null,
-          job_url: post.url ?? null,
+          job_description: jobDescription,
+          job_url: post.url ? sanitizeUtf16String(post.url) : null,
           job_source: "linkedin_post_feed",
           job_location: null,
           job_salary_range: null,
           job_posted_at: post.postedAt ?? null,
-          company_name: post.companyName ?? null,
+          company_name: post.companyName ? sanitizeUtf16String(post.companyName) : null,
           company_url: null,
-          company_linkedin_url: post.companyLinkedinUrl ?? null,
+          company_linkedin_url: post.companyLinkedinUrl
+            ? sanitizeUtf16String(post.companyLinkedinUrl)
+            : null,
           company_description: null,
           company_size: null,
           company_location: null,
           company_industry: null,
           company_funding: null,
-          contact_name: post.authorName ?? null,
-          contact_title: post.authorTitle ?? null,
+          contact_name: post.authorName ? sanitizeUtf16String(post.authorName) : null,
+          contact_title: post.authorTitle ? sanitizeUtf16String(post.authorTitle) : null,
           contact_email: null,
-          contact_linkedin_url: post.authorUrl ?? null,
+          contact_linkedin_url: post.authorUrl ? sanitizeUtf16String(post.authorUrl) : null,
           status: "backlog",
           score,
           enrichment_data,
           tags: [],
           channel: "LinkedIn Post Feeds",
-        };
+        }) as Record<string, unknown>;
       });
 
       if (leadsToInsert.length === 0) {
@@ -860,34 +962,44 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const { data: inserted, error: insertLeadError } = await supabase
-        .from("leads")
-        .insert(leadsToInsert)
-        .select("id");
+      let importedCount = 0;
+      for (let i = 0; i < leadsToInsert.length; i += EDGE_LEADS_INSERT_BATCH) {
+        const chunk = leadsToInsert.slice(i, i + EDGE_LEADS_INSERT_BATCH);
+        const { data: insertedChunk, error: insertLeadError } = await supabase
+          .from("leads")
+          .insert(chunk as never)
+          .select("id");
 
-      if (insertLeadError) {
-        const insertMsg = insertLeadError?.message ?? String(insertLeadError);
-        const details = (insertLeadError as unknown as { details?: string; hint?: string; code?: string | number }).details;
-        const hint = (insertLeadError as unknown as { details?: string; hint?: string; code?: string | number }).hint;
-        const code = (insertLeadError as unknown as { details?: string; hint?: string; code?: string | number }).code;
-        await supabase
-          .from("scraping_jobs")
-          .update({
-            status: "failed",
-            error_message: [insertMsg, details ? `details: ${details}` : null, hint ? `hint: ${hint}` : null]
+        if (insertLeadError) {
+          const insertMsg = insertLeadError?.message ?? String(insertLeadError);
+          const details = (insertLeadError as unknown as { details?: string; hint?: string; code?: string | number }).details;
+          const hint = (insertLeadError as unknown as { details?: string; hint?: string; code?: string | number }).hint;
+          const code = (insertLeadError as unknown as { details?: string; hint?: string; code?: string | number }).code;
+          await supabase.from("leads").delete().eq("scraping_job_id", scrapingJobId);
+          await supabase
+            .from("scraping_jobs")
+            .update({
+              status: "failed",
+              error_message: [insertMsg, details ? `details: ${details}` : null, hint ? `hint: ${hint}` : null]
+                .filter(Boolean)
+                .join(" | "),
+              completed_at: new Date().toISOString(),
+            })
+            .eq("id", scrapingJobId);
+          throw new Error(
+            [insertMsg, details ? `details: ${details}` : null, hint ? `hint: ${hint}` : null, code ? `code: ${code}` : null]
               .filter(Boolean)
               .join(" | "),
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", scrapingJobId);
-        throw new Error([insertMsg, details ? `details: ${details}` : null, hint ? `hint: ${hint}` : null, code ? `code: ${code}` : null].filter(Boolean).join(" | "));
+          );
+        }
+        importedCount += (insertedChunk as { id: string }[] | null)?.length ?? 0;
       }
 
       await supabase
         .from("scraping_jobs")
         .update({
           leads_found: postsAfterLocationFilter.length,
-          leads_imported: inserted?.length ?? 0,
+          leads_imported: importedCount,
           status: "completed",
           completed_at: new Date().toISOString(),
         })
@@ -896,8 +1008,8 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           scrapingJobId,
-          imported: inserted?.length ?? 0,
-          skipped: postsAfterLocationFilter.length - (inserted?.length ?? 0),
+          imported: importedCount,
+          skipped: postsAfterLocationFilter.length - importedCount,
           totalFromApify,
           savedSearchId: resolvedSavedSearchId,
           savedSearchName: resolvedSavedSearchName,
