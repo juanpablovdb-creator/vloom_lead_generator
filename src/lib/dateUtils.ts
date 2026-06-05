@@ -57,3 +57,10 @@ export function isoToDateInputValue(iso: string | null): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+
+/** Short local date for display (e.g. on CRM cards). */
+export function formatShortLocalDate(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { dateStyle: 'short' });
+}

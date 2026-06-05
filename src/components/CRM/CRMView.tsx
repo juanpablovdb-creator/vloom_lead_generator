@@ -1,7 +1,7 @@
 // =====================================================
 // Leadflow Vloom - CRM view (Kanban + Tabla + useLeads)
 // =====================================================
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { LayoutGrid, Plus, X, Target, Trash2, Loader2, Columns } from 'lucide-react';
 import Papa from 'papaparse';
 import { recomputeLeadScores, enrichLeadsWithPersonas } from '@/lib/apify';
@@ -17,6 +17,8 @@ import { FilterBar } from '@/components/FilterBar';
 import { LeadCardPopup } from './LeadCardPopup';
 import { CrmDateInput } from './CrmDateInput';
 import { lastFridayDateOnly } from '@/lib/dateUtils';
+import { useFirstContactDatesMap } from '@/hooks/useFirstContactDates';
+import { syncMissingFirstContactedAt } from '@/lib/syncFirstContactedAt';
 
 const CHANNEL_OPTIONS = LEAD_CHANNEL_OPTIONS;
 const ASSIGNEE_OPTIONS = ['Aron D\'mello', 'Andres Leal', 'Juan Pablo Val'] as const;
@@ -328,7 +330,25 @@ export function CRMView() {
   const [lastCsvImportedAt, setLastCsvImportedAt] = useState<string | null>(null);
   const [csvBatchUpdating, setCsvBatchUpdating] = useState(false);
   const [csvBatchUpdateError, setCsvBatchUpdateError] = useState<string | null>(null);
+  const [datesRefreshKey, setDatesRefreshKey] = useState(0);
+  const backfillStarted = useRef(false);
+  const firstContactAtByLeadId = useFirstContactDatesMap(datesRefreshKey);
   const { tasks, updateTaskStatus, updateTaskTitle, deleteTask, createTask, refreshTasks } = useTasks();
+
+  useEffect(() => {
+    if (backfillStarted.current) return;
+    backfillStarted.current = true;
+    syncMissingFirstContactedAt()
+      .then((updated) => {
+        if (updated > 0) {
+          void refreshLeads();
+          setDatesRefreshKey((k) => k + 1);
+        }
+      })
+      .catch(() => {
+        backfillStarted.current = false;
+      });
+  }, [refreshLeads]);
   const [bulkFirstContactDate, setBulkFirstContactDate] = useState('');
   const [bulkStatus, setBulkStatus] = useState<LeadStatus>('disqualified');
   const [bulkAssignee, setBulkAssignee] = useState('');
@@ -1122,6 +1142,7 @@ export function CRMView() {
           // Always one card per lead: "By companies" only collapses rows in the table, not pipeline stages.
           leads={leads}
           isLoading={isLoading}
+          firstContactAtByLeadId={firstContactAtByLeadId}
           onStatusChange={updateLeadStatus}
           onUpdateLead={(id, updates) => updateLead(id, updates)}
           onOpenLead={(lead) => setSelectedLead(lead)}
