@@ -724,6 +724,19 @@ function haystackMatchesExcludeNeedleClient(
   }
 }
 
+
+function isApifyActorPermissionError(message: string): boolean {
+  return /requires full access|approvePermissions|approve its permissions/i.test(message);
+}
+
+function profileScrapePermissionWarning(message: string): string {
+  const m = message.match(/https:\/\/console\.apify\.com\/[^\s)]+/i);
+  const url = m?.[0] ?? null;
+  return url
+    ? `Author profile location check skipped — approve once in Apify: ${url} Exclude mode still filters post text/headlines.`
+    : "Author profile location check skipped — approve harvestapi/linkedin-profile-scraper in Apify Console. Exclude mode still filters post text/headlines.";
+}
+
 function haystackMatchesAnyExcludeNeedleClient(
   p: PostFeedNormalized,
   needles: string[],
@@ -1105,6 +1118,7 @@ async function runLinkedInPostFeedBrowser(options: {
       .filter(Boolean);
 
     let postsAfterLocationFilter = posts;
+    let locationFilterWarning: string | null = null;
 
     if (locationNeedles.length > 0) {
       const uniqueAuthorUrlsAll = Array.from(
@@ -1128,12 +1142,13 @@ async function runLinkedInPostFeedBrowser(options: {
       const authorUrlToLocation = new Map<string, string>();
       const batchSize = 10;
 
-      for (let i = 0; i < uniqueAuthorUrls.length; i += batchSize) {
-        const batchUrls = uniqueAuthorUrls.slice(i, i + batchSize);
-        if (batchUrls.length === 0) continue;
-        const profileItems =
-          await client.runLinkedInHarvestProfileScraper(batchUrls);
-        for (const p of profileItems) {
+      try {
+        for (let i = 0; i < uniqueAuthorUrls.length; i += batchSize) {
+          const batchUrls = uniqueAuthorUrls.slice(i, i + batchSize);
+          if (batchUrls.length === 0) continue;
+          const profileItems =
+            await client.runLinkedInHarvestProfileScraper(batchUrls);
+          for (const p of profileItems) {
           const rawProfileUrl =
             pStr(p?.linkedinUrl) ||
             pStr(p?.url) ||
@@ -1160,7 +1175,12 @@ async function runLinkedInPostFeedBrowser(options: {
           }
           if (linkedinUrl && finalLoc)
             authorUrlToLocation.set(linkedinUrl, finalLoc);
+          }
         }
+      } catch (profileErr) {
+        const msg = profileErr instanceof Error ? profileErr.message : String(profileErr);
+        if (!isApifyActorPermissionError(msg)) throw profileErr;
+        locationFilterWarning = profileScrapePermissionWarning(msg);
       }
 
       // Exclude: profile location when available; else scan post text so India/PK etc. still drop without a scrape.
@@ -1335,8 +1355,12 @@ async function runLinkedInPostFeedBrowser(options: {
       totalFromApify,
       savedSearchId: resolvedSavedSearchId,
       savedSearchName: resolvedSavedSearchName,
-      message:
+      message: [
         "Post Feeds en el navegador con tu API key de Apify (sin Edge Function).",
+        locationFilterWarning,
+      ]
+        .filter(Boolean)
+        .join(" "),
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
