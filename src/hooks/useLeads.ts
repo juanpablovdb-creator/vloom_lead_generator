@@ -39,10 +39,20 @@ interface UseLeadsOptions {
    * Use for CRM Kanban so pipeline columns are complete.
    */
   fetchFullFilteredSet?: boolean;
+  /**
+   * Column list for `.select(...)`. Prefer lean CRM fields over `*` to avoid timeouts
+   * (enrichment_data / descriptions make responses very large).
+   */
+  selectColumns?: string;
 }
 
+/** Columns needed for CRM Kanban + table list (avoids heavy JSON blobs). */
+export const CRM_LEAD_SELECT =
+  'id,user_id,company_name,contact_name,contact_title,contact_email,contact_linkedin_url,contact_phone,job_title,job_url,job_location,company_location,company_url,company_linkedin_url,company_industry,company_size,channel,score,tags,status,assignee,first_contacted_at,notes,is_marked_as_lead,scraping_job_id,updated_at,created_at';
+
 const FULL_FETCH_BATCH = 1000;
-const FULL_FETCH_CAP = 50_000;
+/** Soft cap so Kanban never pulls tens of thousands of full rows in one session. */
+const FULL_FETCH_CAP = 8_000;
 
 interface UseLeadsReturn {
   // Data
@@ -100,6 +110,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     initialSort = DEFAULT_SORT,
     pageSize: initialPageSize = 25,
     fetchFullFilteredSet = false,
+    selectColumns = '*',
   } = options;
 
   // State
@@ -127,11 +138,12 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
   }, [initialFilters?.scraping_job_id, initialFilters?.saved_search_id]);
 
   // Ordered query without range (saved_search `.in` is applied in fetchLeads).
-  const buildLeadsOrderedQuery = useCallback(() => {
+  const buildLeadsOrderedQuery = useCallback((opts?: { withExactCount?: boolean }) => {
     if (!supabase) return null;
-    let query = supabase
-      .from('leads')
-      .select('*', { count: 'exact' });
+    const withExactCount = opts?.withExactCount !== false;
+    let query = withExactCount
+      ? supabase.from('leads').select(selectColumns, { count: 'exact' })
+      : supabase.from('leads').select(selectColumns);
 
     // Status filter
     if (filters.status && filters.status.length > 0) {
@@ -242,7 +254,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     query = query.order(sort.column, { ascending: sort.direction === 'asc' });
 
     return query;
-  }, [filters, sort]);
+  }, [filters, sort, selectColumns]);
 
   // Fetch leads
   const fetchLeads = useCallback(async () => {
@@ -275,16 +287,16 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
         }
       }
 
-      const attachSavedSearch = (q: Exclude<ReturnType<typeof buildLeadsOrderedQuery>, null>) =>
-        jobIds ? q.in('scraping_job_id', jobIds) : q;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const attachSavedSearch = (q: any) => (jobIds ? q.in('scraping_job_id', jobIds) : q);
 
       if (fetchFullFilteredSet) {
         const merged: Lead[] = [];
         let offset = 0;
-        let total: number | null = null;
 
         while (offset < FULL_FETCH_CAP) {
-          const base = buildLeadsOrderedQuery();
+          // Skip exact COUNT(*) — that alone times out on large CRM tables.
+          const base = buildLeadsOrderedQuery({ withExactCount: false });
           if (!base) {
             setLeads([]);
             setTotalCount(0);
@@ -292,24 +304,22 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
             return;
           }
           const to = Math.min(offset + FULL_FETCH_BATCH - 1, FULL_FETCH_CAP - 1);
-          const { data, error: queryError, count } = await attachSavedSearch(base).range(offset, to);
+          const { data, error: queryError } = await attachSavedSearch(base).range(offset, to);
 
           if (queryError) throw queryError;
-          if (total == null && count != null) total = count;
 
-          const chunk = data || [];
+          const chunk = (data || []) as Lead[];
           merged.push(...chunk);
           if (chunk.length === 0) break;
           if (chunk.length < FULL_FETCH_BATCH) break;
-          if (total != null && merged.length >= total) break;
           offset += chunk.length;
         }
 
         setLeads(merged);
-        setTotalCount(total ?? merged.length);
-        setPagination((prev) => ({ ...prev, total: total ?? merged.length }));
+        setTotalCount(merged.length);
+        setPagination((prev) => ({ ...prev, total: merged.length }));
       } else {
-        const base = buildLeadsOrderedQuery();
+        const base = buildLeadsOrderedQuery({ withExactCount: true });
         if (!base) {
           setLeads([]);
           setTotalCount(0);
@@ -322,7 +332,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
 
         if (queryError) throw queryError;
 
-        setLeads(data || []);
+        setLeads((data || []) as Lead[]);
         setTotalCount(count || 0);
         setPagination((prev) => ({ ...prev, total: count || 0 }));
       }
@@ -347,11 +357,13 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       }
 
       const message =
-        err instanceof Error
-          ? err.message
-          : typeof (err as { message?: string })?.message === 'string'
-            ? (err as { message: string }).message
-            : 'Failed to fetch leads';
+        /statement timeout|canceling statement/i.test(rawMessage)
+          ? 'CRM query timed out. Apply fewer filters (e.g. Marked leads only + date range), or switch to Table view. If this persists, add DB indexes (migration 026).'
+          : err instanceof Error
+            ? err.message
+            : typeof (err as { message?: string })?.message === 'string'
+              ? (err as { message: string }).message
+              : 'Failed to fetch leads';
       setError(message);
       console.error('Error fetching leads:', err);
     } finally {

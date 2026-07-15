@@ -30,13 +30,19 @@ interface UseTasksReturn {
   deleteTask: (id: string) => Promise<void>;
 }
 
+interface UseTasksOptions {
+  /** When false, skip the initial all-tasks fetch (CRM opens faster). */
+  enabled?: boolean;
+}
+
 /**
  * Returns tasks for the current user (e.g. "Contact X" linked to leads).
  * Tasks are created automatically when a user marks a job post as lead.
  */
-export function useTasks(): UseTasksReturn {
+export function useTasks(options: UseTasksOptions = {}): UseTasksReturn {
+  const { enabled = true } = options;
   const [tasks, setTasks] = useState<TaskWithLead[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const fetchTasks = useCallback(async () => {
@@ -53,11 +59,13 @@ export function useTasks(): UseTasksReturn {
       setIsLoading(false);
       return;
     }
+    // Cap payload: CRM only needs recent tasks for the open card.
     const { data, error: fetchErr } = await supabase
       .from('tasks')
       .select('*, leads(job_url, company_name, company_linkedin_url, company_funding, job_posted_at, contact_name, status)')
       .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(500);
 
     if (fetchErr) {
       setError(fetchErr.message);
@@ -69,8 +77,12 @@ export function useTasks(): UseTasksReturn {
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      setIsLoading(false);
+      return;
+    }
     fetchTasks();
-  }, [fetchTasks]);
+  }, [enabled, fetchTasks]);
 
   const updateTaskStatus = useCallback(async (id: string, status: TaskStatus) => {
     if (!supabase) return;
