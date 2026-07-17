@@ -2,10 +2,13 @@
 // Leadflow Vloom - CRM card (Kanban)
 // =====================================================
 import type { Lead } from '@/types/database';
-import { ExternalLink, MapPin, Briefcase, User, CheckCircle2, Circle, CheckSquare, Square } from 'lucide-react';
+import { ExternalLink, MapPin, Briefcase, User, CheckCircle2, Circle, CheckSquare, Square, Calendar } from 'lucide-react';
+import { formatShortLocalDate } from '@/lib/dateUtils';
 
 interface CRMCardProps {
   lead: Lead;
+  /** Resolved first contact (DB field or history fallback). */
+  firstContactAt?: string | null;
   onDragStart: (e: React.DragEvent, lead: Lead) => void;
   onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
   onOpen?: (lead: Lead) => void;
@@ -49,7 +52,7 @@ function logoUrlForLead(lead: Lead): string | null {
   return `https://logo.clearbit.com/${host}`;
 }
 
-export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen, isSelected = false, onToggleSelected }: CRMCardProps) {
+export function CRMCard({ lead, firstContactAt, onDragStart, onUpdateLead, onOpen, isSelected = false, onToggleSelected }: CRMCardProps) {
   const companyStr = lead.company_name?.trim() || '';
   const contactStr = lead.contact_name?.trim() || '';
   const jobStr = lead.job_title?.trim() || '';
@@ -77,6 +80,7 @@ export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen, isSelected = 
   const locationLabel = (lead.company_location || lead.job_location || '').trim() || null;
   const assigneeLabel = (lead.assignee || '').trim() || null;
   const videoSent = lead.tags?.includes('video_sent') ?? false;
+  const firstContactLabel = formatShortLocalDate(firstContactAt ?? lead.first_contacted_at);
 
   return (
     <div
@@ -149,6 +153,10 @@ export function CRMCard({ lead, onDragStart, onUpdateLead, onOpen, isSelected = 
             <span className="truncate">{assigneeLabel}</span>
           </div>
         )}
+        <div className="flex items-center gap-1.5 text-muted-foreground">
+          <Calendar className="w-3 h-3 flex-shrink-0" />
+          <span className="truncate">First contact: {firstContactLabel ?? '—'}</span>
+        </div>
       </div>
 
       <div className="flex items-center justify-between pt-1">

@@ -34,14 +34,19 @@ export function getWeekKey(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-/** Parse ISO date string into local Date. */
-function parseDate(iso: string): Date {
-  return new Date(iso);
+/**
+ * Week key from an ISO timestamp used for KPI cohort (first contact / invite_sent).
+ * Uses the local calendar day so date-only values and UTC-midnight timestamps
+ * do not shift into the previous week (e.g. Jun 1 landing in May 25–31).
+ */
+export function getWeekKeyFromISO(iso: string): string {
+  const d = new Date(iso);
+  return getWeekKey(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0));
 }
 
 /** First-contact date for attribution: when the lead entered the pipeline (created_at). */
 export function getFirstContactWeekKey(lead: Lead): string {
-  return getWeekKey(parseDate(lead.created_at));
+  return getWeekKeyFromISO(lead.created_at);
 }
 
 /**
@@ -55,7 +60,7 @@ export function getPeopleContactedWeekKey(
   if (!firstInviteSentAtByLeadId) return null;
   const at = firstInviteSentAtByLeadId.get(lead.id);
   if (!at) return null;
-  return getWeekKey(parseDate(at));
+  return getWeekKeyFromISO(at);
 }
 
 /** Stages we track in history for funnel counts (must have been in this stage at some point). */

@@ -255,6 +255,22 @@ function haystackMatchesAnyExcludeNeedle(p: PostResult, needles: string[]): bool
   return needles.some((n) => haystackMatchesExcludeNeedle(hay, n));
 }
 
+function isApifyActorPermissionError(message: string): boolean {
+  return /requires full access|approvePermissions|approve its permissions/i.test(message);
+}
+
+function extractApprovePermissionsUrl(message: string): string | null {
+  const m = message.match(/https:\/\/console\.apify\.com\/[^\s)]+/i);
+  return m?.[0] ?? null;
+}
+
+function profileScrapePermissionWarning(message: string): string {
+  const url = extractApprovePermissionsUrl(message);
+  return url
+    ? `Author profile location check skipped — approve once in Apify: ${url} Exclude mode still filters post text/headlines.`
+    : "Author profile location check skipped — approve harvestapi/linkedin-profile-scraper in Apify Console. Exclude mode still filters post text/headlines.";
+}
+
 /** Smaller JSON in `enrichment_data` to avoid Edge OOM on bulk insert. Full post text stays in `job_description`. */
 function slimPostForEdgeStorage(post: PostResult): Record<string, unknown> {
   const text = sanitizeUtf16String(post.text ?? "");
@@ -713,6 +729,7 @@ Deno.serve(async (req: Request) => {
         .filter(Boolean);
 
       let postsAfterLocationFilter = posts;
+      let locationFilterWarning: string | null = null;
 
       // Si el usuario pidió filtro por localización del autor, la ubicación debe venir del scraper de perfil.
       // El actor linkedin-post-search no entrega location del autor en el output (según su doc/sample output).
@@ -761,7 +778,8 @@ Deno.serve(async (req: Request) => {
           });
         };
 
-        for (let i = 0; i < uniqueAuthorUrls.length; i += batchSize) {
+        try {
+          for (let i = 0; i < uniqueAuthorUrls.length; i += batchSize) {
           const batchUrls = uniqueAuthorUrls.slice(i, i + batchSize);
           if (batchUrls.length === 0) continue;
 
@@ -788,6 +806,9 @@ Deno.serve(async (req: Request) => {
               if (errBody?.error?.message) msg = errBody.error.message;
             } catch {
               // use errText as-is
+            }
+            if (isApifyActorPermissionError(msg)) {
+              throw new Error(msg);
             }
             throw new Error(`Apify profile run failed: ${msg}`);
           }
@@ -834,6 +855,12 @@ Deno.serve(async (req: Request) => {
             }
             if (linkedinUrl && finalLoc) authorUrlToLocation.set(linkedinUrl, finalLoc);
           }
+          }
+        } catch (profileErr) {
+          const msg = profileErr instanceof Error ? profileErr.message : String(profileErr);
+          if (!isApifyActorPermissionError(msg)) throw profileErr;
+          locationFilterWarning = profileScrapePermissionWarning(msg);
+          console.warn("[run-linkedin-post-feed]", locationFilterWarning);
         }
 
         // Apply location filter: profile location when available; in **exclude** mode also scan post text
@@ -1013,6 +1040,7 @@ Deno.serve(async (req: Request) => {
           totalFromApify,
           savedSearchId: resolvedSavedSearchId,
           savedSearchName: resolvedSavedSearchName,
+          warning: locationFilterWarning ?? undefined,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );

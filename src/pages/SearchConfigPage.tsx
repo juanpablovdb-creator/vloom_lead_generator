@@ -508,7 +508,7 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       type: "locations",
       required: false,
       helpText:
-        "Include mode: uses author profile location when available; if we cannot fetch it, posts are kept (best-effort). Exclude mode: drops when profile location matches; if profile location is missing, we also scan post text, headline, and company for your excluded places (e.g. India, Pakistan).",
+        "Uses harvestapi/linkedin-profile-scraper for author location (one-time Apify approval required — Apify Console → open the actor → Approve permissions). Include mode: keeps posts when profile location is unknown. Exclude mode: also scans post text/headlines when profile is missing. Clear location filters to skip profile scraping.",
       icon: <MapPin className="w-4 h-4" />,
       options: LOCATION_OPTIONS.map((loc) => ({ value: loc, label: loc })),
     },

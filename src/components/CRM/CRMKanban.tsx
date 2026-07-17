@@ -48,6 +48,7 @@ const PIPELINE_STAGES: { id: LeadStatus; label: string }[] = [
 interface CRMKanbanProps {
   leads: Lead[];
   isLoading: boolean;
+  firstContactAtByLeadId?: Map<string, string> | null;
   onStatusChange: (leadId: string, status: LeadStatus) => Promise<void>;
   onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
   onOpenLead?: (lead: Lead) => void;
@@ -58,6 +59,7 @@ interface CRMKanbanProps {
 export function CRMKanban({
   leads,
   isLoading,
+  firstContactAtByLeadId,
   onStatusChange,
   onUpdateLead,
   onOpenLead,
@@ -155,6 +157,7 @@ export function CRMKanban({
               <CRMCard
                 key={lead.id}
                 lead={lead}
+                firstContactAt={firstContactAtByLeadId?.get(lead.id) ?? lead.first_contacted_at}
                 onDragStart={handleDragStart}
                 onUpdateLead={onUpdateLead}
                 onOpen={onOpenLead}
