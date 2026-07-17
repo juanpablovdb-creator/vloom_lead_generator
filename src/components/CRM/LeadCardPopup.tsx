@@ -454,13 +454,12 @@ export function LeadCardPopup({
                 wrapperClassName="w-full max-w-xs"
                 inputClassName="text-sm py-2"
                 value={isoToDateInputValue(localLead.first_contacted_at ?? null) || undefined}
-                onChange={(raw) => {
+                onChange={async (raw) => {
+                  // Persist on change (not blur): calendar button blurs the input before
+                  // the pick, and blur would otherwise save a stale/null value.
                   const v = raw ? dateOnlyToISO(raw) : null;
-                  setLocalLead({ ...localLead, first_contacted_at: v });
-                }}
-                onBlur={async () => {
-                  const v = localLead.first_contacted_at;
-                  await onUpdateLead(localLead.id, { first_contacted_at: v ?? null });
+                  setLocalLead((prev) => ({ ...prev, first_contacted_at: v }));
+                  await onUpdateLead(localLead.id, { first_contacted_at: v });
                 }}
                 title="First contact date"
               />

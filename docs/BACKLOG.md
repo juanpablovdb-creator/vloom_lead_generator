@@ -84,6 +84,7 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] CRM: Kanban muestra leads antiguos (sube `pageSize` para evitar “missing” en Negotiation sin búsqueda)
 - [x] CRM: Kanban ignora colapso “By companies” (una tarjeta por lead; colapso solo en tabla)
 - [x] CRM / FilterBar: opción **By both** como vista por defecto + By people / By companies
+- [x] CRM: fix First contact date en popup (persistir en onChange; blur + calendario no guardaban)
 
 ---
 
