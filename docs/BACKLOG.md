@@ -85,6 +85,7 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] CRM: Kanban ignora colapso “By companies” (una tarjeta por lead; colapso solo en tabla)
 - [x] CRM / FilterBar: opción **By both** como vista por defecto + By people / By companies
 - [x] CRM: fix First contact date en popup (persistir en onChange; blur + calendario no guardaban)
+- [x] Post Feeds: fix búsquedas caídas — retry 502 al arrancar actors + soft-fail perfil (Edge 150s / gateway)
 
 ---
 

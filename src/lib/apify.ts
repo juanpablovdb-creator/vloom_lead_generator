@@ -729,12 +729,33 @@ function isApifyActorPermissionError(message: string): boolean {
   return /requires full access|approvePermissions|approve its permissions/i.test(message);
 }
 
+function isApifyTransientErrorMessage(message: string): boolean {
+  return /502|503|504|429|bad gateway|gateway time-?out|service unavailable|temporarily unavailable|econnreset|etimedout|fetch failed|networkerror|wall.?clock|cpu time|worker.*limit|timed? ?out waiting|apify profile run failed|profile scraping/i
+    .test(message);
+}
+
 function profileScrapePermissionWarning(message: string): string {
   const m = message.match(/https:\/\/console\.apify\.com\/[^\s)]+/i);
   const url = m?.[0] ?? null;
   return url
     ? `Author profile location check skipped — approve once in Apify: ${url} Exclude mode still filters post text/headlines.`
     : "Author profile location check skipped — approve harvestapi/linkedin-profile-scraper in Apify Console. Exclude mode still filters post text/headlines.";
+}
+
+function profileScrapeSkipWarning(message: string): string {
+  if (isApifyActorPermissionError(message)) return profileScrapePermissionWarning(message);
+  const short = message.replace(/\s+/g, " ").trim().slice(0, 160);
+  return (
+    "Author profile location check skipped (Apify gateway/timeout). " +
+    "Exclude mode still filters post text/headlines. " +
+    (short ? `Details: ${short}` : "")
+  ).trim();
+}
+
+function isSoftFailProfileScrapeError(message: string): boolean {
+  return (
+    isApifyActorPermissionError(message) || isApifyTransientErrorMessage(message)
+  );
 }
 
 function haystackMatchesAnyExcludeNeedleClient(
@@ -1179,8 +1200,8 @@ async function runLinkedInPostFeedBrowser(options: {
         }
       } catch (profileErr) {
         const msg = profileErr instanceof Error ? profileErr.message : String(profileErr);
-        if (!isApifyActorPermissionError(msg)) throw profileErr;
-        locationFilterWarning = profileScrapePermissionWarning(msg);
+        if (!isSoftFailProfileScrapeError(msg)) throw profileErr;
+        locationFilterWarning = profileScrapeSkipWarning(msg);
       }
 
       // Exclude: profile location when available; else scan post text so India/PK etc. still drop without a scrape.
@@ -2142,7 +2163,14 @@ function parseApifyError(errText: string): string {
   } catch {
     // use errText as-is
   }
-  return errText;
+  const t = errText.replace(/\s+/g, " ").trim();
+  if (/<\s*html/i.test(t) || /bad gateway/i.test(t)) {
+    if (/502/i.test(t)) return "502 Bad Gateway (Apify API temporarily unavailable)";
+    if (/503/i.test(t)) return "503 Service Unavailable (Apify API temporarily unavailable)";
+    if (/504/i.test(t)) return "504 Gateway Timeout (Apify API temporarily unavailable)";
+    return "Apify API temporarily unavailable (gateway error)";
+  }
+  return t.length > 400 ? `${t.slice(0, 400)}…` : t;
 }
 
 const APIFY_DATASET_FETCH_MAX_ATTEMPTS = 6;
@@ -2194,26 +2222,48 @@ export class ApifyClient {
     const actorIdForUrl = toApifyActorId(actorId);
     const url = `${APIFY_BASE_URL}/acts/${actorIdForUrl}/runs?waitForFinish=${waitForFinishSeconds}`;
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...this.headers,
-      },
-      body: JSON.stringify(input),
-    });
+    const maxAttempts = 5;
+    let lastErrText = "";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...this.headers,
+        },
+        body: JSON.stringify(input),
+      });
 
-    if (!response.ok) {
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          runId: data.data.id,
+          status: data.data.status,
+          datasetId: data.data.defaultDatasetId,
+        };
+      }
+
       const errText = await response.text();
-      throw new Error(`Apify error: ${parseApifyError(errText)}`);
+      lastErrText = errText;
+      const retryable =
+        response.status === 429 ||
+        response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504;
+      if (!retryable || attempt === maxAttempts) {
+        const hint =
+          retryable
+            ? " Apify's API was temporarily unavailable; wait a minute and try again."
+            : "";
+        throw new Error(`Apify error: ${parseApifyError(errText)}${hint}`);
+      }
+      const delayMs =
+        Math.min(10_000, 400 * 2 ** (attempt - 1)) +
+        Math.floor(Math.random() * 350);
+      await new Promise((r) => setTimeout(r, delayMs));
     }
 
-    const data = await response.json();
-    return {
-      runId: data.data.id,
-      status: data.data.status,
-      datasetId: data.data.defaultDatasetId,
-    };
+    throw new Error(`Apify error: ${parseApifyError(lastErrText)}`);
   }
 
   /** Get run status (and defaultDatasetId when finished). */

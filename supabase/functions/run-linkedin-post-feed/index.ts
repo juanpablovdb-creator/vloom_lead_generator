@@ -3,6 +3,10 @@
 // Returns: { scrapingJobId, imported, skipped, totalFromApify, savedSearchId?, savedSearchName? }.
 
 import { fetchApifyDatasetItemsWithRetry } from "../_shared/apifyFetchDataset.ts";
+import {
+  fetchApifyResponseWithRetry,
+  isApifyTransientErrorMessage,
+} from "../_shared/apifyHttpRetry.ts";
 import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
 import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
 import { computeLeadScore } from "../_shared/leadScore.ts";
@@ -13,8 +17,8 @@ const LINKEDIN_POSTS_ACTOR = "harvestapi/linkedin-post-search";
 const LINKEDIN_PROFILE_SCRAPER_ACTOR = "harvestapi/linkedin-profile-scraper";
 const LINKEDIN_PROFILE_SCRAPER_MODE = "Profile details no email ($4 per 1k)";
 
-/** Supabase Edge has tight CPU/memory; profile scraping + huge inserts OOM easily. */
-const EDGE_MAX_AUTHOR_PROFILES = 48;
+/** Supabase Edge has ~150s wall clock; keep profile scrape small so post search can finish. */
+const EDGE_MAX_AUTHOR_PROFILES = 24;
 const EDGE_LEADS_INSERT_BATCH = 60;
 /** Large post payloads (many long texts) can exhaust the Edge isolate. */
 const EDGE_MAX_POSTS = 350;
@@ -255,6 +259,17 @@ function haystackMatchesAnyExcludeNeedle(p: PostResult, needles: string[]): bool
   return needles.some((n) => haystackMatchesExcludeNeedle(hay, n));
 }
 
+function stripApifyErrorNoise(raw: string): string {
+  const t = raw.replace(/\s+/g, " ").trim();
+  if (/<\s*html/i.test(t) || /bad gateway/i.test(t)) {
+    if (/502/i.test(t)) return "502 Bad Gateway (Apify API temporarily unavailable)";
+    if (/503/i.test(t)) return "503 Service Unavailable (Apify API temporarily unavailable)";
+    if (/504/i.test(t)) return "504 Gateway Timeout (Apify API temporarily unavailable)";
+    return "Apify API temporarily unavailable (gateway error)";
+  }
+  return t.length > 400 ? `${t.slice(0, 400)}…` : t;
+}
+
 function isApifyActorPermissionError(message: string): boolean {
   return /requires full access|approvePermissions|approve its permissions/i.test(message);
 }
@@ -269,6 +284,25 @@ function profileScrapePermissionWarning(message: string): string {
   return url
     ? `Author profile location check skipped — approve once in Apify: ${url} Exclude mode still filters post text/headlines.`
     : "Author profile location check skipped — approve harvestapi/linkedin-profile-scraper in Apify Console. Exclude mode still filters post text/headlines.";
+}
+
+function isSoftFailProfileScrapeError(message: string): boolean {
+  return (
+    isApifyActorPermissionError(message) ||
+    isApifyTransientErrorMessage(message) ||
+    /profile scraping|apify profile run failed|no dataset id from profile/i.test(message)
+  );
+}
+
+function profileScrapeSkipWarning(message: string): string {
+  if (isApifyActorPermissionError(message)) return profileScrapePermissionWarning(message);
+  const short = message.replace(/\s+/g, " ").trim().slice(0, 160);
+  return (
+    "Author profile location check skipped (Apify gateway/timeout). " +
+    "Exclude mode still filters post text/headlines. " +
+    "Tip: add an Apify key in Settings to run profiles in the browser (no Edge 150s cap). " +
+    (short ? `Details: ${short}` : "")
+  ).trim();
 }
 
 /** Smaller JSON in `enrichment_data` to avoid Edge OOM on bulk insert. Full post text stays in `job_description`. */
@@ -641,7 +675,7 @@ Deno.serve(async (req: Request) => {
 
       const actorIdForUrl = toApifyActorId(LINKEDIN_POSTS_ACTOR);
       const runUrl = `${APIFY_BASE_URL}/acts/${actorIdForUrl}/runs?waitForFinish=60`;
-      const runRes = await fetch(runUrl, {
+      const runRes = await fetchApifyResponseWithRetry(runUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -656,9 +690,9 @@ Deno.serve(async (req: Request) => {
           const errBody = JSON.parse(errText) as { error?: { message?: string } };
           if (errBody?.error?.message) msg = errBody.error.message;
         } catch {
-          // use errText as-is
+          // use errText as-is (often HTML 502 from Apify gateway)
         }
-        throw new Error(`Apify run failed: ${msg}`);
+        throw new Error(`Apify run failed: ${stripApifyErrorNoise(msg)}`);
       }
 
       const runData = await runRes.json();
@@ -746,18 +780,23 @@ Deno.serve(async (req: Request) => {
         const uniqueAuthorUrls = uniqueAuthorUrlsAll.slice(0, maxAuthorUrlsToScrape);
 
         const authorUrlToLocation = new Map<string, string>();
-        const batchSize = 8; // smaller batches = smaller Apify JSON payloads per step
+        // Small batches + short wait: Edge wall clock ~150s (post search already used some).
+        const batchSize = 8;
+        const maxProfileBatches = 3; // ≤24 profiles
 
         const actorIdForUrl = toApifyActorId(LINKEDIN_PROFILE_SCRAPER_ACTOR);
 
         const pollAndFetchDatasetItems = async (runId: string, datasetIdFallback?: string) => {
-          const maxWait = 300;
+          const maxWait = 90;
           const step = 5;
           let resolvedDatasetId = datasetIdFallback;
 
           const apifyHeaders = { Authorization: `Bearer ${apiToken}` };
           for (let waited = 0; waited < maxWait; waited += step) {
-            const statusRes = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, { headers: apifyHeaders });
+            const statusRes = await fetchApifyResponseWithRetry(
+              `${APIFY_BASE_URL}/actor-runs/${runId}`,
+              { headers: apifyHeaders },
+            );
             if (!statusRes.ok) {
               const errBody = await statusRes.json().catch(() => ({}));
               const msg = (errBody as { error?: { message?: string } })?.error?.message;
@@ -770,6 +809,7 @@ Deno.serve(async (req: Request) => {
             if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") {
               throw new Error("Profile scraping run failed.");
             }
+            await new Promise((r) => setTimeout(r, step * 1000));
           }
 
           if (!resolvedDatasetId) throw new Error("No dataset ID from profile scraping run.");
@@ -779,17 +819,18 @@ Deno.serve(async (req: Request) => {
         };
 
         try {
-          for (let i = 0; i < uniqueAuthorUrls.length; i += batchSize) {
-          const batchUrls = uniqueAuthorUrls.slice(i, i + batchSize);
+          const urlsToScrape = uniqueAuthorUrls.slice(0, maxProfileBatches * batchSize);
+          for (let i = 0; i < urlsToScrape.length; i += batchSize) {
+          const batchUrls = urlsToScrape.slice(i, i + batchSize);
           if (batchUrls.length === 0) continue;
 
-          const runUrl = `${APIFY_BASE_URL}/acts/${actorIdForUrl}/runs?waitForFinish=60`;
+          const runUrl = `${APIFY_BASE_URL}/acts/${actorIdForUrl}/runs?waitForFinish=40`;
           const apifyInput = {
             profileScraperMode: LINKEDIN_PROFILE_SCRAPER_MODE,
             queries: batchUrls,
           };
 
-          const runRes = await fetch(runUrl, {
+          const runRes = await fetchApifyResponseWithRetry(runUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -805,12 +846,12 @@ Deno.serve(async (req: Request) => {
               const errBody = JSON.parse(errText) as { error?: { message?: string } };
               if (errBody?.error?.message) msg = errBody.error.message;
             } catch {
-              // use errText as-is
+              // use errText as-is (often HTML 502 from Apify gateway)
             }
             if (isApifyActorPermissionError(msg)) {
               throw new Error(msg);
             }
-            throw new Error(`Apify profile run failed: ${msg}`);
+            throw new Error(`Apify profile run failed: ${stripApifyErrorNoise(msg)}`);
           }
 
           const runData = await runRes.json();
@@ -858,8 +899,8 @@ Deno.serve(async (req: Request) => {
           }
         } catch (profileErr) {
           const msg = profileErr instanceof Error ? profileErr.message : String(profileErr);
-          if (!isApifyActorPermissionError(msg)) throw profileErr;
-          locationFilterWarning = profileScrapePermissionWarning(msg);
+          if (!isSoftFailProfileScrapeError(msg)) throw profileErr;
+          locationFilterWarning = profileScrapeSkipWarning(msg);
           console.warn("[run-linkedin-post-feed]", locationFilterWarning);
         }
 
