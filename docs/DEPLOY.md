@@ -127,7 +127,14 @@ El frontend es una SPA estática: no hay servidor propio. Las variables `VITE_SU
 - **URL y anon key:** Son las que ya usas en el dashboard de Supabase (proyecto de producción). No hace falta “desplegar” Supabase: el proyecto en supabase.com **es** producción.
 - **Auth:** Si usas redirects (magic link, OAuth), en **Authentication → URL Configuration** añade la URL de tu frontend en producción (p. ej. `https://leadflow.vercel.app`) en **Site URL** y en **Redirect URLs**.
 - **RLS:** Asegúrate de que las políticas RLS están aplicadas en todas las tablas que usa el frontend (leads, profiles, tasks, etc.).
-- **API keys sensibles:** Apify, SendGrid, Anthropic, etc. siguen en la tabla `api_keys` en Supabase (por usuario); no se ponen en el frontend ni en Vercel/Netlify.
+- **API keys sensibles:** Apify, SendGrid, Anthropic, etc. van en la tabla `api_keys` en Supabase (**por `user_id` del usuario logueado**); no se ponen en el frontend ni en Vercel/Netlify como `VITE_*` (quedarían en el bundle).
+- **Post Feeds / timeout 150s en producción:** El `.env` local **no aplica** en Vercel. Si ves `Request idle timeout limit (150s) reached`:
+  1. **Deploy Edge** con el código actual:  
+     `npx supabase functions deploy run-linkedin-post-feed`  
+     (Edge ya no scrapea perfiles y topea posts; sin deploy, prod sigue con el código viejo.)
+  2. **Clave Apify por usuario** (modo navegador, sin tope 150s): en Table Editor → `api_keys`, fila `service=apify`, `is_active=true`, y **`user_id` = UUID del usuario en Authentication → Users** (si `user_id` está vacío, la app no la lee por RLS).
+  3. **Redeploy frontend** (Vercel) tras mergear los cambios de cliente (mensajes / fallback).
+  4. Opcional de prueba: bajar Max posts / Posted limit / quitar filtros de país hasta que el Edge nuevo esté desplegado.
 
 ---
 

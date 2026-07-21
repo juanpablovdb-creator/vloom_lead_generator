@@ -28,6 +28,14 @@ export const DEFAULT_BLOCKED_COMPANY_DISPLAY_NAMES = [
   'Bionic Talent',
   'Jobs Ai',
   'icreatives',
+  'Ahmedabad Jobs',
+  'Jharkhand jobs, India',
+  'West Bengal Jobs',
+  'Hyderabad Jobs',
+  'Punjab jobs, India',
+  'Haryana Jobs',
+  'Bihar jobs, India',
+  'India Abroad',
 ] as const;
 
 export function buildDefaultBlockedCompanyNormalizedSet(): Set<string> {
