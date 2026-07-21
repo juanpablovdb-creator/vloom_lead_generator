@@ -546,7 +546,7 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       placeholder: "200",
       defaultValue: 200,
       helpText:
-        "Maximum posts to fetch per query (higher = more cost). Server-side runs cap at 350 posts per query for stability; add your Apify key in Settings to run in the browser without that cap.",
+        "Maximum posts to fetch per query (higher = more cost). Server-side runs cap at 100 posts (Edge 150s limit) and skip profile location scrape; add your Apify key in Settings to run in the browser without those caps.",
       icon: <Hash className="w-4 h-4" />,
     },
     {

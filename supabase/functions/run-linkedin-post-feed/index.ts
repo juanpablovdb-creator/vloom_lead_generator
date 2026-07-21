@@ -5,7 +5,6 @@
 import { fetchApifyDatasetItemsWithRetry } from "../_shared/apifyFetchDataset.ts";
 import {
   fetchApifyResponseWithRetry,
-  isApifyTransientErrorMessage,
 } from "../_shared/apifyHttpRetry.ts";
 import { normalizeApifyRunStatus } from "../_shared/apifyStatus.ts";
 import { resolveUserAndClient } from "../_shared/resolveUserAndClient.ts";
@@ -14,14 +13,12 @@ import { loadExistingLeadDedupeKeys } from "../_shared/loadExistingLeadDedupeKey
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const LINKEDIN_POSTS_ACTOR = "harvestapi/linkedin-post-search";
-const LINKEDIN_PROFILE_SCRAPER_ACTOR = "harvestapi/linkedin-profile-scraper";
-const LINKEDIN_PROFILE_SCRAPER_MODE = "Profile details no email ($4 per 1k)";
 
-/** Supabase Edge has ~150s wall clock; keep profile scrape small so post search can finish. */
-const EDGE_MAX_AUTHOR_PROFILES = 24;
+/** Supabase Edge has ~150s wall clock — keep post search small; never scrape profiles on Edge. */
+const EDGE_MAX_AUTHOR_PROFILES = 0;
 const EDGE_LEADS_INSERT_BATCH = 60;
-/** Large post payloads (many long texts) can exhaust the Edge isolate. */
-const EDGE_MAX_POSTS = 350;
+/** Large post payloads + long Apify runs exceed Edge wall clock; browser path allows more. */
+const EDGE_MAX_POSTS = 100;
 
 /** API docs: actorId is username~actor-name (tilde). Normalize slash to tilde for URL. */
 function toApifyActorId(actorId: string): string {
@@ -189,7 +186,7 @@ function buildSearchParams(input: Record<string, unknown>): {
       ? maxAuthorUrlsToScrapeRaw
       : Number(maxAuthorUrlsToScrapeRaw) || EDGE_MAX_AUTHOR_PROFILES;
   const maxAuthorUrlsToScrape = Math.min(
-    Math.max(1, parsed),
+    Math.max(0, parsed),
     EDGE_MAX_AUTHOR_PROFILES,
   );
 
@@ -268,41 +265,6 @@ function stripApifyErrorNoise(raw: string): string {
     return "Apify API temporarily unavailable (gateway error)";
   }
   return t.length > 400 ? `${t.slice(0, 400)}…` : t;
-}
-
-function isApifyActorPermissionError(message: string): boolean {
-  return /requires full access|approvePermissions|approve its permissions/i.test(message);
-}
-
-function extractApprovePermissionsUrl(message: string): string | null {
-  const m = message.match(/https:\/\/console\.apify\.com\/[^\s)]+/i);
-  return m?.[0] ?? null;
-}
-
-function profileScrapePermissionWarning(message: string): string {
-  const url = extractApprovePermissionsUrl(message);
-  return url
-    ? `Author profile location check skipped — approve once in Apify: ${url} Exclude mode still filters post text/headlines.`
-    : "Author profile location check skipped — approve harvestapi/linkedin-profile-scraper in Apify Console. Exclude mode still filters post text/headlines.";
-}
-
-function isSoftFailProfileScrapeError(message: string): boolean {
-  return (
-    isApifyActorPermissionError(message) ||
-    isApifyTransientErrorMessage(message) ||
-    /profile scraping|apify profile run failed|no dataset id from profile/i.test(message)
-  );
-}
-
-function profileScrapeSkipWarning(message: string): string {
-  if (isApifyActorPermissionError(message)) return profileScrapePermissionWarning(message);
-  const short = message.replace(/\s+/g, " ").trim().slice(0, 160);
-  return (
-    "Author profile location check skipped (Apify gateway/timeout). " +
-    "Exclude mode still filters post text/headlines. " +
-    "Tip: add an Apify key in Settings to run profiles in the browser (no Edge 150s cap). " +
-    (short ? `Details: ${short}` : "")
-  ).trim();
 }
 
 /** Smaller JSON in `enrichment_data` to avoid Edge OOM on bulk insert. Full post text stays in `job_description`. */
@@ -716,12 +678,16 @@ Deno.serve(async (req: Request) => {
       if (status === "SUCCEEDED" && datasetId) {
         await getDatasetItems(datasetId);
       } else if ((status === "RUNNING" || status === "READY") && runId) {
-        const maxWait = 600;
+        // Edge wall clock ~150s; fail early with a clear message instead of being killed idle.
+        const maxWait = 90;
         const step = 5;
         let pollFinished = false;
         for (let waited = 0; waited < maxWait; waited += step) {
           await new Promise((r) => setTimeout(r, step * 1000));
-          const statusRes = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, { headers: apifyHeaders });
+          const statusRes = await fetchApifyResponseWithRetry(
+            `${APIFY_BASE_URL}/actor-runs/${runId}`,
+            { headers: apifyHeaders },
+          );
           if (!statusRes.ok) {
             const errBody = await statusRes.json().catch(() => ({}));
             const msg = (errBody as { error?: { message?: string } })?.error?.message;
@@ -741,13 +707,10 @@ Deno.serve(async (req: Request) => {
           }
         }
         if (!pollFinished) {
-          const finalRes = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, { headers: apifyHeaders });
-          const finalData = finalRes.ok ? await finalRes.json() : null;
-          const fs = finalData?.data?.status != null
-            ? String(finalData.data.status)
-            : "UNKNOWN";
           throw new Error(
-            `Apify run did not finish in time (last status: ${fs}). Try again or check the run in Apify Console.`,
+            "Apify post search did not finish within the Edge time budget (~90s). " +
+              "Add your Apify key in Settings to run in the browser (no 150s cap), " +
+              "or lower Max posts / use a shorter Posted limit.",
           );
         }
       } else if (status === "SUCCEEDED" && !datasetId) {
@@ -765,147 +728,16 @@ Deno.serve(async (req: Request) => {
       let postsAfterLocationFilter = posts;
       let locationFilterWarning: string | null = null;
 
-      // Si el usuario pidió filtro por localización del autor, la ubicación debe venir del scraper de perfil.
-      // El actor linkedin-post-search no entrega location del autor en el output (según su doc/sample output).
+      // Author location filter: Edge never scrapes profiles (wall clock ~150s). Use post-text
+      // exclude fallback only. Full profile scrape requires Apify key → browser path.
       if (locationNeedles.length > 0) {
-        const uniqueAuthorUrlsAll = Array.from(
-          new Set(
-            posts
-              .map((p) => normalizeLinkedInUrlForMatching(p.authorUrl ?? undefined))
-              .filter(Boolean) as string[]
-          )
-        );
-        // `maxAuthorUrlsToScrape` is already capped in buildSearchParams (EDGE_MAX_AUTHOR_PROFILES).
-        const maxAuthorUrlsToScrape = Math.max(1, params.maxAuthorUrlsToScrape);
-        const uniqueAuthorUrls = uniqueAuthorUrlsAll.slice(0, maxAuthorUrlsToScrape);
-
         const authorUrlToLocation = new Map<string, string>();
-        // Small batches + short wait: Edge wall clock ~150s (post search already used some).
-        const batchSize = 8;
-        const maxProfileBatches = 3; // ≤24 profiles
+        locationFilterWarning =
+          "Author profile location scrape skipped on server (Edge 150s limit). " +
+          "Exclude mode still filters post text/headlines. " +
+          "Add your Apify key in Settings to run full profile location checks in the browser.";
+        console.warn("[run-linkedin-post-feed]", locationFilterWarning);
 
-        const actorIdForUrl = toApifyActorId(LINKEDIN_PROFILE_SCRAPER_ACTOR);
-
-        const pollAndFetchDatasetItems = async (runId: string, datasetIdFallback?: string) => {
-          const maxWait = 90;
-          const step = 5;
-          let resolvedDatasetId = datasetIdFallback;
-
-          const apifyHeaders = { Authorization: `Bearer ${apiToken}` };
-          for (let waited = 0; waited < maxWait; waited += step) {
-            const statusRes = await fetchApifyResponseWithRetry(
-              `${APIFY_BASE_URL}/actor-runs/${runId}`,
-              { headers: apifyHeaders },
-            );
-            if (!statusRes.ok) {
-              const errBody = await statusRes.json().catch(() => ({}));
-              const msg = (errBody as { error?: { message?: string } })?.error?.message;
-              throw new Error(msg ?? "Failed to get run status");
-            }
-            const statusData = await statusRes.json();
-            const s = normalizeApifyRunStatus(statusData?.data?.status);
-            resolvedDatasetId = resolvedDatasetId ?? statusData?.data?.defaultDatasetId;
-            if (s === "SUCCEEDED") break;
-            if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") {
-              throw new Error("Profile scraping run failed.");
-            }
-            await new Promise((r) => setTimeout(r, step * 1000));
-          }
-
-          if (!resolvedDatasetId) throw new Error("No dataset ID from profile scraping run.");
-          return fetchApifyDatasetItemsWithRetry(resolvedDatasetId, apifyHeaders, {
-            apiBaseUrl: APIFY_BASE_URL,
-          });
-        };
-
-        try {
-          const urlsToScrape = uniqueAuthorUrls.slice(0, maxProfileBatches * batchSize);
-          for (let i = 0; i < urlsToScrape.length; i += batchSize) {
-          const batchUrls = urlsToScrape.slice(i, i + batchSize);
-          if (batchUrls.length === 0) continue;
-
-          const runUrl = `${APIFY_BASE_URL}/acts/${actorIdForUrl}/runs?waitForFinish=40`;
-          const apifyInput = {
-            profileScraperMode: LINKEDIN_PROFILE_SCRAPER_MODE,
-            queries: batchUrls,
-          };
-
-          const runRes = await fetchApifyResponseWithRetry(runUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiToken}`,
-            },
-            body: JSON.stringify(apifyInput),
-          });
-
-          if (!runRes.ok) {
-            const errText = await runRes.text();
-            let msg = errText;
-            try {
-              const errBody = JSON.parse(errText) as { error?: { message?: string } };
-              if (errBody?.error?.message) msg = errBody.error.message;
-            } catch {
-              // use errText as-is (often HTML 502 from Apify gateway)
-            }
-            if (isApifyActorPermissionError(msg)) {
-              throw new Error(msg);
-            }
-            throw new Error(`Apify profile run failed: ${stripApifyErrorNoise(msg)}`);
-          }
-
-          const runData = await runRes.json();
-          const runId = runData?.data?.id;
-          const datasetId = runData?.data?.defaultDatasetId;
-          const statusRawProfile = runData?.data?.status;
-          const status = normalizeApifyRunStatus(statusRawProfile);
-
-          if (status !== "SUCCEEDED" && status !== "RUNNING" && status !== "READY") {
-            throw new Error(`Apify profile run status: ${(statusRawProfile ?? status) || "unknown"}`);
-          }
-
-          let profileItems: Record<string, unknown>[] = [];
-          if (status === "SUCCEEDED" && datasetId) {
-            const apifyHeaders = { Authorization: `Bearer ${apiToken}` };
-            profileItems = await fetchApifyDatasetItemsWithRetry(datasetId, apifyHeaders, {
-              apiBaseUrl: APIFY_BASE_URL,
-            });
-          } else if (runId) {
-            profileItems = await pollAndFetchDatasetItems(runId, datasetId);
-          }
-
-          for (const p of profileItems) {
-            const rawProfileUrl =
-              str(p?.linkedinUrl) ||
-              str(p?.url) ||
-              str(p?.profileUrl) ||
-              str(p?.linkedin_url) ||
-              str(p?.profile_url);
-            const linkedinUrl = normalizeLinkedInUrlForMatching(rawProfileUrl || undefined);
-            const locObj = p?.location as Record<string, unknown> | undefined;
-            const locationStr = (locObj?.linkedinText as string | undefined) ?? undefined;
-            const parsedText = locObj?.parsed as Record<string, unknown> | undefined;
-            const parsedLocation =
-              (parsedText?.text as string | undefined) ??
-              (parsedText?.city as string | undefined) ??
-              (parsedText?.country as string | undefined) ??
-              undefined;
-            let finalLoc = (locationStr || parsedLocation || "").toString().trim();
-            if (!finalLoc && typeof p.location === "string") {
-              finalLoc = p.location.trim();
-            }
-            if (linkedinUrl && finalLoc) authorUrlToLocation.set(linkedinUrl, finalLoc);
-          }
-          }
-        } catch (profileErr) {
-          const msg = profileErr instanceof Error ? profileErr.message : String(profileErr);
-          if (!isSoftFailProfileScrapeError(msg)) throw profileErr;
-          locationFilterWarning = profileScrapeSkipWarning(msg);
-          console.warn("[run-linkedin-post-feed]", locationFilterWarning);
-        }
-
-        // Apply location filter: profile location when available; in **exclude** mode also scan post text
-        // so India/PK (etc.) posts drop when we never scraped that author (cap) or profile had no location.
         postsAfterLocationFilter = posts.filter((p) => {
           const authorUrlKey = normalizeLinkedInUrlForMatching(p.authorUrl ?? undefined);
           const locRaw = authorUrlKey ? (authorUrlToLocation.get(authorUrlKey) ?? "") : "";

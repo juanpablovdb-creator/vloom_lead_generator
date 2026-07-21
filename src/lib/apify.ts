@@ -1397,8 +1397,16 @@ async function runLinkedInPostFeedBrowser(options: {
   }
 }
 
-/** Supabase Edge can OOM on large Post Feeds imports; surface a clearer message. */
+/** Supabase Edge can OOM / idle-timeout on large Post Feeds imports; surface a clearer message. */
 function formatPostFeedEdgeComputeError(original: string): string {
+  if (/idle timeout|150s|wall.?clock|cpu time|worker.*limit/i.test(original)) {
+    return [
+      "Post Feeds hit the Supabase Edge 150s time limit.",
+      "Fix: add your Apify API key in Settings so the search runs in your browser (no Edge cap),",
+      "or lower Max posts / clear author-location filters / use a shorter Posted limit.",
+      `Detail: ${original}`,
+    ].join(" ");
+  }
   if (!/compute resources|not enough compute/i.test(original)) return original;
   return [
     "Post Feeds hit Supabase Edge limits (memory or CPU).",
@@ -1407,9 +1415,15 @@ function formatPostFeedEdgeComputeError(original: string): string {
   ].join(" ");
 }
 
+function isPostFeedEdgeTimeoutError(message: string): boolean {
+  return /idle timeout|150s|wall.?clock|cpu time|worker.*limit|time budget|did not finish within the Edge/i
+    .test(message);
+}
+
 /**
  * Run LinkedIn Post Feed search via Edge Function (API key stays in Edge Function Secrets).
- * With a browser Apify key, runs locally to avoid Edge JWT gateway issues (same pattern as LinkedIn Jobs).
+ * With a browser Apify key, runs locally to avoid Edge JWT gateway issues and the ~150s wall clock
+ * (same pattern as LinkedIn Jobs).
  */
 export async function runLinkedInPostFeedViaEdge(options: {
   input?: Record<string, unknown>;
@@ -1421,6 +1435,23 @@ export async function runLinkedInPostFeedViaEdge(options: {
   if (await userHasActiveApifyKeyInSettings()) {
     return runLinkedInPostFeedBrowser(options);
   }
+
+  const tryBrowserAfterEdgeTimeout = async (
+    edgeMsg: string,
+  ): Promise<RunLinkedInSearchResult> => {
+    try {
+      return await runLinkedInPostFeedBrowser(options);
+    } catch (fallbackErr) {
+      const fb =
+        fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+      const needKey = /API key not configured|add it in Settings/i.test(fb);
+      throw new Error(
+        needKey
+          ? formatPostFeedEdgeComputeError(edgeMsg)
+          : `${formatPostFeedEdgeComputeError(edgeMsg)} Browser fallback failed: ${fb}`,
+      );
+    }
+  };
 
   const bodyPayload: Record<string, unknown> = {};
   if (options.input !== undefined) bodyPayload.input = options.input;
@@ -1446,21 +1477,12 @@ export async function runLinkedInPostFeedViaEdge(options: {
         totalFromApify?: number;
         savedSearchId?: string | null;
         savedSearchName?: string | null;
+        locationFilterWarning?: string | null;
       } | null;
       if (body?.error != null) {
         const errStr = edgeBodyErrorToString(body.error);
-        if (edgeAuthFailureHint(errStr)) {
-          try {
-            return await runLinkedInPostFeedBrowser(options);
-          } catch (fallbackErr) {
-            const fb =
-              fallbackErr instanceof Error
-                ? fallbackErr.message
-                : String(fallbackErr);
-            throw new Error(
-              `${formatEdge401("run-linkedin-post-feed", errStr)} Modo navegador no disponible: ${fb}`,
-            );
-          }
+        if (edgeAuthFailureHint(errStr) || isPostFeedEdgeTimeoutError(errStr)) {
+          return tryBrowserAfterEdgeTimeout(errStr);
         }
         throw new Error(formatPostFeedEdgeComputeError(errStr));
       }
@@ -1481,23 +1503,8 @@ export async function runLinkedInPostFeedViaEdge(options: {
       const isUnreachable = /fetch failed|NetworkError|Failed to fetch/i.test(
         msg,
       );
-      if (isUnreachable) {
-        try {
-          return await runLinkedInPostFeedBrowser(options);
-        } catch (fallbackErr) {
-          const detail =
-            fallbackErr instanceof Error
-              ? fallbackErr.message
-              : String(fallbackErr);
-          const needKey = /API key not configured|add it in Settings/i.test(
-            detail,
-          );
-          throw new Error(
-            needKey
-              ? `Edge Function is not deployed or unreachable. Either: (1) Run "npx supabase functions deploy run-linkedin-post-feed --no-verify-jwt" and set APIFY_API_TOKEN in Edge secrets, or (2) Add your Apify key in api_keys (Supabase). Details: ${detail}`
-              : `Edge Function unreachable. Deploy run-linkedin-post-feed and set APIFY_API_TOKEN in secrets. Browser fallback failed. Details: ${detail}`,
-          );
-        }
+      if (isUnreachable || isPostFeedEdgeTimeoutError(msg)) {
+        return tryBrowserAfterEdgeTimeout(msg);
       }
       throw new Error(formatPostFeedEdgeComputeError(msg));
     }
@@ -1508,19 +1515,27 @@ export async function runLinkedInPostFeedViaEdge(options: {
       if (status === 401 && attempt === 0) continue;
 
       const tryBrowser =
-        status === 401 || status === 403 || edgeAuthFailureHint(message);
+        status === 401 ||
+        status === 403 ||
+        status === 504 ||
+        status === 546 ||
+        edgeAuthFailureHint(message) ||
+        isPostFeedEdgeTimeoutError(message);
       if (tryBrowser) {
-        try {
-          return await runLinkedInPostFeedBrowser(options);
-        } catch (fallbackErr) {
-          const fb =
-            fallbackErr instanceof Error
-              ? fallbackErr.message
-              : String(fallbackErr);
-          throw new Error(
-            `${formatEdge401("run-linkedin-post-feed", message)} Modo navegador no disponible: ${fb}`,
-          );
+        if (status === 401 || status === 403 || edgeAuthFailureHint(message)) {
+          try {
+            return await runLinkedInPostFeedBrowser(options);
+          } catch (fallbackErr) {
+            const fb =
+              fallbackErr instanceof Error
+                ? fallbackErr.message
+                : String(fallbackErr);
+            throw new Error(
+              `${formatEdge401("run-linkedin-post-feed", message)} Modo navegador no disponible: ${fb}`,
+            );
+          }
         }
+        return tryBrowserAfterEdgeTimeout(message || `HTTP ${status}`);
       }
       throw new Error(
         formatPostFeedEdgeComputeError(
@@ -1532,7 +1547,17 @@ export async function runLinkedInPostFeedViaEdge(options: {
     if (error instanceof FunctionsHttpError) {
       const { status, message } = await parseFunctionsHttpError(error);
       if (status === 401 && attempt === 0) continue;
-      if (status === 401 || status === 403 || edgeAuthFailureHint(message)) {
+      if (
+        status === 401 ||
+        status === 403 ||
+        status === 504 ||
+        status === 546 ||
+        edgeAuthFailureHint(message) ||
+        isPostFeedEdgeTimeoutError(message)
+      ) {
+        if (isPostFeedEdgeTimeoutError(message) || status === 504 || status === 546) {
+          return tryBrowserAfterEdgeTimeout(message || `HTTP ${status}`);
+        }
         try {
           return await runLinkedInPostFeedBrowser(options);
         } catch (fallbackErr) {
@@ -1553,18 +1578,8 @@ export async function runLinkedInPostFeedViaEdge(options: {
     }
 
     const loose = error instanceof Error ? error.message : String(error);
-    if (edgeAuthFailureHint(loose)) {
-      try {
-        return await runLinkedInPostFeedBrowser(options);
-      } catch (fallbackErr) {
-        const fb =
-          fallbackErr instanceof Error
-            ? fallbackErr.message
-            : String(fallbackErr);
-        throw new Error(
-          `${formatEdge401("run-linkedin-post-feed", loose)} Modo navegador no disponible: ${fb}`,
-        );
-      }
+    if (edgeAuthFailureHint(loose) || isPostFeedEdgeTimeoutError(loose)) {
+      return tryBrowserAfterEdgeTimeout(loose);
     }
 
     throw new Error(

@@ -86,6 +86,7 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] CRM / FilterBar: opción **By both** como vista por defecto + By people / By companies
 - [x] CRM: fix First contact date en popup (persistir en onChange; blur + calendario no guardaban)
 - [x] Post Feeds: fix búsquedas caídas — retry 502 al arrancar actors + soft-fail perfil (Edge 150s / gateway)
+- [x] Post Feeds: Edge sin scrape de perfiles + cap 100 posts + fallback navegador en idle timeout 150s
 
 ---
 
