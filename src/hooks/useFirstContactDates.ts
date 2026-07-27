@@ -70,10 +70,10 @@ export function useFirstContactDatesMap(refreshKey = 0): Map<string, string> | n
       });
 
       for (const row of funnelLeads) {
+        // Prefer explicit first_contacted_at (same field CRM date-filters on).
+        // Do NOT fall back to updated_at/created_at — that made cards show dates KPIs ignore.
         if (row.first_contacted_at) {
           byLead.set(row.id, row.first_contacted_at);
-        } else if (!byLead.has(row.id)) {
-          byLead.set(row.id, row.updated_at ?? row.created_at);
         }
       }
 

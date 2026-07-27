@@ -88,6 +88,7 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Post Feeds: fix búsquedas caídas — retry 502 al arrancar actors + soft-fail perfil (Edge 150s / gateway)
 - [x] Post Feeds: Edge sin scrape de perfiles + cap 100 posts + fallback navegador en idle timeout 150s
 - [x] Blocklist default: boards India (Ahmedabad/Jharkhand/West Bengal/Hyderabad/Punjab/Haryana/Bihar/India Abroad)
+- [x] KPIs: alinear First contact con CRM (`first_contacted_at` + paginación; sin marked-only / sin updated_at)
 
 ---
 

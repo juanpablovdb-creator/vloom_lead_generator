@@ -1,7 +1,7 @@
 // =====================================================
 // Leadflow Vloom - KPI tracking by week (Mon–Sun)
 // =====================================================
-// "First contact" (Companies) = week when the lead was moved to invite_sent (CRM).
+// "First contact" (Companies) = week of leads.first_contacted_at (same field as CRM date filter).
 // All metrics show Companies. Click a number to see the list for that metric.
 // Optional filter by channel to see KPIs per channel.
 
@@ -24,6 +24,7 @@ import {
 } from '@/lib/kpiUtils';
 import { supabase } from '@/lib/supabase';
 import { SUPABASE_CONFIG_HINT } from '@/lib/supabase';
+import { fetchAllPages } from '@/lib/supabaseFetchAll';
 import type { Lead, LeadStatus } from '@/types/database';
 import { CrmDateInput } from '@/components/CRM/CrmDateInput';
 
@@ -270,7 +271,12 @@ const KPI_COHORT_STATUSES: LeadStatus[] = [
   'lost',
 ];
 
-/** First time each lead was moved to invite_sent (from lead_status_history). */
+/**
+ * Cohort map: lead_id → first_contacted_at ISO.
+ * Aligned with CRM First-contact date filter: uses `leads.first_contacted_at` only
+ * (not history/updated_at), same funnel statuses, no is_marked_as_lead gate
+ * (CRM Kanban may show unmarked cards when that filter is off).
+ */
 function useFirstInviteSentByLead(params?: {
   firstContactedFrom?: string;
   firstContactedTo?: string;
@@ -284,8 +290,8 @@ function useFirstInviteSentByLead(params?: {
 
     const run = async () => {
       if (!supabase) return;
+      const client = supabase;
 
-      // Same calendar-day bounds as CRM `useLeads` (start/end of local day), not noon — avoids KPI/CRM mismatch.
       const fromIso = params?.firstContactedFrom
         ? firstContactFilterGteBound(params.firstContactedFrom)
         : undefined;
@@ -299,47 +305,35 @@ function useFirstInviteSentByLead(params?: {
         return true;
       };
 
-      const { data: funnelLeads, error: funnelError } = await supabase
-        .from('leads')
-        .select('id, first_contacted_at')
-        .eq('is_marked_as_lead', true)
-        .neq('status', 'disqualified')
-        .in('status', KPI_COHORT_STATUSES)
-        .not('first_contacted_at', 'is', null);
+      try {
+        // Paginate: PostgREST defaults to max 1000 rows — truncating here under-counts weeks.
+        const funnelLeads = await fetchAllPages<{ id: string; first_contacted_at: string }>(
+          async (from, to) => {
+            const res = await client
+              .from('leads')
+              .select('id, first_contacted_at')
+              .neq('status', 'disqualified')
+              .in('status', KPI_COHORT_STATUSES)
+              .not('first_contacted_at', 'is', null)
+              .range(from, to);
+            return {
+              data: res.data as { id: string; first_contacted_at: string }[] | null,
+              error: res.error,
+            };
+          }
+        );
 
-      const firstContactedAtByLeadId = new Map<string, string>();
-      if (!funnelError) {
-        for (const row of (funnelLeads ?? []) as { id: string; first_contacted_at: string | null }[]) {
+        const byLead = new Map<string, string>();
+        for (const row of funnelLeads) {
           const at = row.first_contacted_at;
-          if (at) firstContactedAtByLeadId.set(row.id, at);
+          if (!at || !withinRange(at)) continue;
+          byLead.set(row.id, at);
         }
+
+        if (!cancelled) setMap(byLead);
+      } catch {
+        if (!cancelled) setMap(new Map());
       }
-
-      const { data: historyRows, error: historyError } = await supabase
-        .from('lead_status_history')
-        .select('lead_id, changed_at')
-        .eq('to_status', 'invite_sent')
-        .order('changed_at', { ascending: true });
-      if (historyError) return;
-
-      const byLead = new Map<string, string>();
-      for (const row of (historyRows ?? []) as { lead_id: string; changed_at: string }[]) {
-        if (byLead.has(row.lead_id)) continue;
-        const override = firstContactedAtByLeadId.get(row.lead_id);
-        const effective = override ?? row.changed_at;
-        if (!withinRange(effective)) continue;
-        byLead.set(row.lead_id, effective);
-      }
-
-      // Fallback: include leads that are already in the funnel but are missing history.
-      // Prefer manual first_contacted_at for cohort.
-      // IMPORTANT: do NOT fallback to updated_at/created_at here — it inflates cohorts and breaks date filters.
-      for (const [leadId, at] of firstContactedAtByLeadId.entries()) {
-        if (!withinRange(at)) continue;
-        if (!byLead.has(leadId)) byLead.set(leadId, at);
-      }
-
-      if (!cancelled) setMap(byLead);
     };
 
     run();
@@ -415,8 +409,8 @@ function useLeadsForKPI(
         let query = client
           .from('leads')
           .select('*')
-          .in('id', chunk)
-          .eq('is_marked_as_lead', true);
+          .in('id', chunk);
+        // Do not require is_marked_as_lead — CRM First-contact filter does not either.
         if (channelFilter && channelFilter.length > 0) {
           query = query.in('channel', channelFilter);
         }
@@ -748,10 +742,10 @@ export function KPITrackingView() {
       </div>
 
       <p className="text-xs text-vloom-muted mb-4">
-        Funnel: First contact (week when moved to First contact in CRM) → Connected → Reply → Positive
-        reply → Negotiation → Closed. Only leads with a recorded move to First contact are included.
-        Each row shows count and rate vs First contact. Click a number to see the list. Use the Channel
-        filter to see KPIs by channel.
+        Funnel: First contact (week of the First contact date field — same as the CRM date filter) →
+        Connected → Reply → Positive reply → Negotiation → Closed. Only leads with a recorded First
+        contact date are included. Each row shows count and rate vs First contact. Click a number to
+        see the list. Use the Channel filter to see KPIs by channel.
       </p>
 
       {listPopover && (
@@ -1111,7 +1105,8 @@ export function KPITrackingView() {
 
       {!isLoading && firstInviteSentByLeadId !== null && kpiLeads.length > 0 && (
         <p className="mt-2 text-xs text-vloom-muted">
-          Only leads with recorded &quot;First contact&quot; date (from CRM moves). Counts match the pipeline.
+          Only leads with a recorded First contact date (same field as the CRM date filter). Weekly
+          First contact totals should match CRM cards in that week when the same date range is applied.
         </p>
       )}
     </div>

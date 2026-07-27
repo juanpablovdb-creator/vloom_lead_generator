@@ -6,6 +6,7 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
+- **KPIs vs CRM — discrepancia First contact:** La cohorte KPI mezclaba historial + `is_marked_as_lead` y queries sin paginar (tope 1000), mientras el CRM filtra solo por `first_contacted_at` (y puede mostrar no marcados). Ahora KPI usa el mismo campo/fechas que el CRM, pagina con `fetchAllPages`, no exige marked, y las cards del CRM ya no inventan fecha con `updated_at`.
 - **Blocklist — boards India:** Añadidas al default `DEFAULT_BLOCKED_COMPANY_DISPLAY_NAMES`: Ahmedabad Jobs, Jharkhand jobs India, West Bengal Jobs, Hyderabad Jobs, Punjab jobs India, Haryana Jobs, Bihar jobs India, India Abroad (rojo/tachado + skip en Send to leads).
 - **Prod vs local — Post Feeds 150s:** El `.env` / `VITE_APIFY_API_TOKEN` local no afecta Vercel. En producción hace falta: (1) `npx supabase functions deploy run-linkedin-post-feed`, (2) fila `api_keys` con `user_id` del usuario Auth (no solo el token), (3) redeploy frontend. Documentado en `DEPLOY.md`.
 - **Post Feeds — timeout 150s (fix real):** El soft-fail de perfiles no bastaba: Edge mataba todo el request (`Request idle timeout limit (150s) reached`) y quedaban saved searches con 0 leads. Ahora Edge **no scrapea perfiles** (solo exclude por texto), tope **100 posts**, poll Apify ~90s con error claro, y el cliente hace fallback a navegador / mensaje a poner clave Apify en Settings. **Deploy obligatorio:** `npx supabase functions deploy run-linkedin-post-feed`.
