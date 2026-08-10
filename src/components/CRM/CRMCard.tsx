@@ -9,6 +9,8 @@ interface CRMCardProps {
   lead: Lead;
   /** Resolved first contact (DB field or history fallback). */
   firstContactAt?: string | null;
+  /** Open (not done) task titles for this lead — shown on the card. */
+  openTasks?: string[];
   onDragStart: (e: React.DragEvent, lead: Lead) => void;
   onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
   onOpen?: (lead: Lead) => void;
@@ -52,7 +54,16 @@ function logoUrlForLead(lead: Lead): string | null {
   return `https://logo.clearbit.com/${host}`;
 }
 
-export function CRMCard({ lead, firstContactAt, onDragStart, onUpdateLead, onOpen, isSelected = false, onToggleSelected }: CRMCardProps) {
+export function CRMCard({
+  lead,
+  firstContactAt,
+  openTasks = [],
+  onDragStart,
+  onUpdateLead,
+  onOpen,
+  isSelected = false,
+  onToggleSelected,
+}: CRMCardProps) {
   const companyStr = lead.company_name?.trim() || '';
   const contactStr = lead.contact_name?.trim() || '';
   const jobStr = lead.job_title?.trim() || '';
@@ -157,6 +168,31 @@ export function CRMCard({ lead, firstContactAt, onDragStart, onUpdateLead, onOpe
           <Calendar className="w-3 h-3 flex-shrink-0" />
           <span className="truncate">First contact: {firstContactLabel ?? '—'}</span>
         </div>
+        {(lead.status === 'positive_reply' || lead.status === 'negotiation') &&
+          lead.budget != null &&
+          Number.isFinite(Number(lead.budget)) && (
+          <div className="flex items-center gap-1.5 text-foreground font-medium">
+            <span className="truncate">Budget: {new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(lead.budget))}</span>
+          </div>
+        )}
+        {openTasks.length > 0 && (
+          <div className="flex flex-col gap-1 pt-0.5">
+            {openTasks.slice(0, 3).map((title) => (
+              <div
+                key={title}
+                className="flex items-center gap-1.5 text-[11px] text-primary"
+              >
+                <CheckSquare className="w-3 h-3 flex-shrink-0 opacity-80" />
+                <span className="truncate">{title}</span>
+              </div>
+            ))}
+            {openTasks.length > 3 && (
+              <span className="text-[10px] text-muted-foreground pl-4">
+                +{openTasks.length - 3} more
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between pt-1">

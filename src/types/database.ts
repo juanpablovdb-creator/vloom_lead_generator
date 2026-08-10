@@ -5,7 +5,7 @@
 
 export type UserRole = 'owner' | 'admin' | 'member';
 
-/** CRM pipeline statuses (post-migration 002) */
+/** CRM pipeline statuses (post-migration 002 + nurturing) */
 export type LeadStatus =
   | 'backlog'
   | 'not_contacted'
@@ -14,6 +14,7 @@ export type LeadStatus =
   | 'reply'
   | 'positive_reply'
   | 'negotiation'
+  | 'nurturing'
   | 'closed'
   | 'lost'
   | 'disqualified';
@@ -113,6 +114,12 @@ export interface Lead {
 
   /** Manual first contact date (for KPI cohort); when set, used instead of history/updated_at. */
   first_contacted_at: string | null;
+
+  /** Deal/budget amount for pipeline weight (Positive reply / Negotiation). */
+  budget: number | null;
+
+  /** User-editable related URLs (decks, samples, docs, LinkedIn, etc.). */
+  links: string[];
   
   // Timestamps
   created_at: string;
@@ -215,8 +222,8 @@ export interface ApiKey {
   updated_at: string;
 }
 
-/** Task status (e.g. "Contact X" linked to a lead when marked as lead). */
-export type TaskStatus = 'pending' | 'done' | 'cancelled';
+/** Task board columns. */
+export type TaskStatus = 'backlog' | 'in_progress' | 'done';
 
 export interface Task {
   id: string;
@@ -224,6 +231,9 @@ export interface Task {
   lead_id: string;
   title: string;
   status: TaskStatus;
+  /** Preset key (follow_up, send_quote, …) when created from Tasks board. */
+  task_type: string | null;
+  due_at: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -42,6 +42,7 @@ function normalizeStatusFromCsv(stage: unknown): Lead['status'] {
   if (s === 'reply') return 'reply';
   if (s === 'positive reply') return 'positive_reply';
   if (s === 'negotiation') return 'negotiation';
+  if (s === 'nurturing') return 'nurturing';
   if (s === 'closed') return 'closed';
   if (s === 'lost') return 'lost';
   return 'backlog';
@@ -329,9 +330,26 @@ export function CRMView() {
   const [lastCsvImportedAt, setLastCsvImportedAt] = useState<string | null>(null);
   const [csvBatchUpdating, setCsvBatchUpdating] = useState(false);
   const [csvBatchUpdateError, setCsvBatchUpdateError] = useState<string | null>(null);
-  const { tasks, updateTaskStatus, updateTaskTitle, deleteTask, createTask, refreshTasks } = useTasks({
-    enabled: !!selectedLead,
-  });
+  // Load tasks for CRM cards (open task chips) and lead popup.
+  const { tasks, updateTaskStatus, updateTaskTitle, deleteTask, createTask, refreshTasks } = useTasks();
+  const openTasksByLeadId = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const t of tasks) {
+      if (t.status === 'done') continue;
+      const list = map.get(t.lead_id) ?? [];
+      list.push(t.title);
+      map.set(t.lead_id, list);
+    }
+    return map;
+  }, [tasks]);
+
+  const handleCrmStatusChange = useCallback(
+    async (leadId: string, status: LeadStatus) => {
+      await updateLeadStatus(leadId, status);
+      await refreshTasks();
+    },
+    [updateLeadStatus, refreshTasks],
+  );
   const [bulkFirstContactDate, setBulkFirstContactDate] = useState('');
   const [bulkStatus, setBulkStatus] = useState<LeadStatus>('disqualified');
   const [bulkAssignee, setBulkAssignee] = useState('');
@@ -464,6 +482,8 @@ export function CRMView() {
           is_marked_as_lead: true,
           channel: LINKEDIN_JOB_POST_CHANNEL,
           first_contacted_at: null,
+          budget: null,
+          links: [],
         };
 
         // If there's a URL, first try to UPDATE existing rows (so stage and marked_as_lead are corrected).
@@ -785,6 +805,7 @@ export function CRMView() {
           { id: 'reply', label: 'Reply', dot: 'bg-stage-reply' },
           { id: 'positive_reply', label: 'Positive reply', dot: 'bg-stage-positive-reply' },
           { id: 'negotiation', label: 'Negotiation', dot: 'bg-stage-negotiation' },
+          { id: 'nurturing', label: 'Nurturing', dot: 'bg-stage-connected' },
           { id: 'closed', label: 'Closed', dot: 'bg-stage-closed' },
           { id: 'lost', label: 'Lost', dot: 'bg-stage-lost' },
           { id: 'disqualified', label: 'Disqualified', dot: 'bg-stage-disqualified' },
@@ -987,6 +1008,7 @@ export function CRMView() {
                   <option value="reply">Reply</option>
                   <option value="positive_reply">Positive reply</option>
                   <option value="negotiation">Negotiation</option>
+                  <option value="nurturing">Nurturing</option>
                   <option value="closed">Closed</option>
                   <option value="lost">Lost</option>
                   <option value="disqualified">Disqualified</option>
@@ -1125,7 +1147,8 @@ export function CRMView() {
           // Always one card per lead: "By companies" only collapses rows in the table, not pipeline stages.
           leads={leads}
           isLoading={isLoading}
-          onStatusChange={updateLeadStatus}
+          openTasksByLeadId={openTasksByLeadId}
+          onStatusChange={handleCrmStatusChange}
           onUpdateLead={(id, updates) => updateLead(id, updates)}
           onOpenLead={(lead) => setSelectedLead(lead)}
           selectedIds={selectedIds}
@@ -1192,12 +1215,17 @@ export function CRMView() {
           lead={selectedLead}
           tasksForLead={tasks.filter((t) => t.lead_id === selectedLead.id)}
           onClose={() => setSelectedLead(null)}
-          onUpdateLead={(id, updates) => updateLead(id, updates)}
-          onUpdateLeadStatus={updateLeadStatus}
+          onUpdateLead={async (id, updates) => {
+            await updateLead(id, updates);
+            setSelectedLead((prev) => (prev && prev.id === id ? { ...prev, ...updates } : prev));
+          }}
+          onUpdateLeadStatus={handleCrmStatusChange}
           onUpdateTaskStatus={updateTaskStatus}
           onUpdateTaskTitle={updateTaskTitle}
           onDeleteTask={deleteTask}
-          onCreateTask={createTask}
+          onCreateTask={async (leadId, title, taskType) => {
+            await createTask({ leadId, title, taskType: taskType ?? null, status: 'backlog' });
+          }}
           onRefreshTasks={refreshTasks}
         />
       )}

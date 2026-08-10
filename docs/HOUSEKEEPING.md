@@ -6,6 +6,7 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
+- **CRM / Tasks overhaul (budget, Nurturing, task board):** Campo `budget` + peso de pipeline en Positive reply / Negotiation; etapa **Nurturing** con follow-up mensual auto; tasks reseteados a Kanban **Backlog / In progress / Done** con presets (Follow up, Send Quote, Send Sample, etc.); links editables + campos LinkedIn/website/contacto/job editable; ya no se crean tasks “Contact …” al marcar lead. Migración `027_budget_links_nurturing_tasks.sql` (aplicar en Supabase).
 - **KPIs vs CRM — discrepancia First contact:** La cohorte KPI mezclaba historial + `is_marked_as_lead` y queries sin paginar (tope 1000), mientras el CRM filtra solo por `first_contacted_at` (y puede mostrar no marcados). Ahora KPI usa el mismo campo/fechas que el CRM, pagina con `fetchAllPages`, no exige marked, y las cards del CRM ya no inventan fecha con `updated_at`.
 - **Blocklist — boards India:** Añadidas al default `DEFAULT_BLOCKED_COMPANY_DISPLAY_NAMES`: Ahmedabad Jobs, Jharkhand jobs India, West Bengal Jobs, Hyderabad Jobs, Punjab jobs India, Haryana Jobs, Bihar jobs India, India Abroad (rojo/tachado + skip en Send to leads).
 - **Prod vs local — Post Feeds 150s:** El `.env` / `VITE_APIFY_API_TOKEN` local no afecta Vercel. En producción hace falta: (1) `npx supabase functions deploy run-linkedin-post-feed`, (2) fila `api_keys` con `user_id` del usuario Auth (no solo el token), (3) redeploy frontend. Documentado en `DEPLOY.md`.
@@ -136,6 +137,7 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Pendiente de limpieza
 
+- [x] **Aplicar migración `027_budget_links_nurturing_tasks.sql`** en Supabase (columnas budget/links, status nurturing, wipe tasks + nuevos estados). Aplicada en remoto vía `supabase db query --linked`.
 - [x] Corregir errores de TypeScript para que `npm run build` pase: hecho (vite-env.d.ts, supabase client any, guards, aserciones).
 - [ ] Revisar imports no usados en componentes.
 - [ ] Unificar clases Tailwind duplicadas (vloom-* vs gray-* residuales).

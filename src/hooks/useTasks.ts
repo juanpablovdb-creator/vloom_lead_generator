@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import type { Task, TaskStatus } from '@/types/database';
 import type { LeadStatus } from '@/types/database';
 
-/** Task with lead data for table columns (company, contact, CRM status) */
+/** Task with lead data for board cards */
 export interface TaskWithLead extends Task {
   leads: {
     job_url: string | null;
@@ -15,8 +15,20 @@ export interface TaskWithLead extends Task {
     company_funding: string | null;
     job_posted_at: string | null;
     contact_name: string | null;
+    contact_email: string | null;
+    contact_linkedin_url: string | null;
     status: LeadStatus | null;
+    budget: number | null;
+    assignee: string | null;
   } | null;
+}
+
+export interface CreateTaskInput {
+  leadId: string;
+  title: string;
+  taskType?: string | null;
+  dueAt?: string | null;
+  status?: TaskStatus;
 }
 
 interface UseTasksReturn {
@@ -26,7 +38,7 @@ interface UseTasksReturn {
   refreshTasks: () => Promise<void>;
   updateTaskStatus: (id: string, status: TaskStatus) => Promise<void>;
   updateTaskTitle: (id: string, title: string) => Promise<void>;
-  createTask: (leadId: string, title: string) => Promise<void>;
+  createTask: (input: CreateTaskInput) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
 }
 
@@ -36,8 +48,8 @@ interface UseTasksOptions {
 }
 
 /**
- * Returns tasks for the current user (e.g. "Contact X" linked to leads).
- * Tasks are created automatically when a user marks a job post as lead.
+ * Tasks board + lead-card task lists.
+ * Presets are created from Tasks tab; nurturing creates monthly follow-ups.
  */
 export function useTasks(options: UseTasksOptions = {}): UseTasksReturn {
   const { enabled = true } = options;
@@ -53,19 +65,22 @@ export function useTasks(options: UseTasksOptions = {}): UseTasksReturn {
     }
     setError(null);
     setIsLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) {
       setTasks([]);
       setIsLoading(false);
       return;
     }
-    // Cap payload: CRM only needs recent tasks for the open card.
     const { data, error: fetchErr } = await supabase
       .from('tasks')
-      .select('*, leads(job_url, company_name, company_linkedin_url, company_funding, job_posted_at, contact_name, status)')
+      .select(
+        '*, leads(job_url, company_name, company_linkedin_url, company_funding, job_posted_at, contact_name, contact_email, contact_linkedin_url, status, budget, assignee)',
+      )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
-      .limit(500);
+      .limit(1000);
 
     if (fetchErr) {
       setError(fetchErr.message);
@@ -86,33 +101,59 @@ export function useTasks(options: UseTasksOptions = {}): UseTasksReturn {
 
   const updateTaskStatus = useCallback(async (id: string, status: TaskStatus) => {
     if (!supabase) return;
-    const { error: updateError } = await supabase.from('tasks').update({ status, updated_at: new Date().toISOString() } as never).eq('id', id);
+    const { error: updateError } = await supabase
+      .from('tasks')
+      .update({ status, updated_at: new Date().toISOString() } as never)
+      .eq('id', id);
 
     if (updateError) throw updateError;
-    setTasks(prev => prev.map(t => (t.id === id ? { ...t, status, updated_at: new Date().toISOString() } as TaskWithLead : t)));
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === id ? ({ ...t, status, updated_at: new Date().toISOString() } as TaskWithLead) : t,
+      ),
+    );
   }, []);
 
   const updateTaskTitle = useCallback(async (id: string, title: string) => {
     if (!supabase) return;
-    const { error: updateError } = await supabase.from('tasks').update({ title, updated_at: new Date().toISOString() } as never).eq('id', id);
+    const { error: updateError } = await supabase
+      .from('tasks')
+      .update({ title, updated_at: new Date().toISOString() } as never)
+      .eq('id', id);
     if (updateError) throw updateError;
-    setTasks(prev => prev.map(t => (t.id === id ? { ...t, title, updated_at: new Date().toISOString() } as TaskWithLead : t)));
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === id ? ({ ...t, title, updated_at: new Date().toISOString() } as TaskWithLead) : t,
+      ),
+    );
   }, []);
 
-  const createTask = useCallback(async (leadId: string, title: string) => {
-    if (!supabase) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { error: insertErr } = await supabase.from('tasks').insert({ user_id: user.id, lead_id: leadId, title, status: 'pending' } as never);
-    if (insertErr) throw insertErr;
-    await fetchTasks();
-  }, [fetchTasks]);
+  const createTask = useCallback(
+    async (input: CreateTaskInput) => {
+      if (!supabase) return;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const { error: insertErr } = await supabase.from('tasks').insert({
+        user_id: user.id,
+        lead_id: input.leadId,
+        title: input.title,
+        status: input.status ?? 'backlog',
+        task_type: input.taskType ?? null,
+        due_at: input.dueAt ?? null,
+      } as never);
+      if (insertErr) throw insertErr;
+      await fetchTasks();
+    },
+    [fetchTasks],
+  );
 
   const deleteTask = useCallback(async (id: string) => {
     if (!supabase) return;
     const { error: deleteError } = await supabase.from('tasks').delete().eq('id', id);
     if (deleteError) throw deleteError;
-    setTasks(prev => prev.filter(t => t.id !== id));
+    setTasks((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   return {

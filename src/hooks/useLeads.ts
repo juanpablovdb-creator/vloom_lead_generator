@@ -6,6 +6,11 @@ import { supabase, getCurrentUser } from '@/lib/supabase';
 import type { Lead, LeadFilters, LeadSort, PaginationState, LeadStatus } from '@/types/database';
 import { LINKEDIN_POST_FEEDS_CHANNEL } from '@/lib/leadChannels';
 import { firstContactFilterGteBound, firstContactFilterLteBound } from '@/lib/dateUtils';
+import {
+  NURTURING_FOLLOW_UP_TITLE,
+  NURTURING_TASK_TYPE,
+  oneMonthFromNowIso,
+} from '@/lib/taskPresets';
 
 const SUPABASE_NOT_CONFIGURED = 'Configure Supabase: add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env';
 
@@ -48,7 +53,7 @@ interface UseLeadsOptions {
 
 /** Columns needed for CRM Kanban + table list (avoids heavy JSON blobs). */
 export const CRM_LEAD_SELECT =
-  'id,user_id,company_name,contact_name,contact_title,contact_email,contact_linkedin_url,contact_phone,job_title,job_url,job_location,company_location,company_url,company_linkedin_url,company_industry,company_size,channel,score,tags,status,assignee,first_contacted_at,notes,is_marked_as_lead,scraping_job_id,updated_at,created_at';
+  'id,user_id,company_name,contact_name,contact_title,contact_email,contact_linkedin_url,contact_phone,job_title,job_url,job_location,company_location,company_url,company_linkedin_url,company_industry,company_size,channel,score,tags,status,assignee,first_contacted_at,budget,links,notes,is_marked_as_lead,scraping_job_id,updated_at,created_at';
 
 const FULL_FETCH_BATCH = 1000;
 /** Soft cap so Kanban never pulls tens of thousands of full rows in one session. */
@@ -479,6 +484,8 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       is_marked_as_lead: true,
       channel: data.channel ?? null,
       first_contacted_at: data.first_contacted_at ?? new Date().toISOString(),
+      budget: null,
+      links: [] as string[],
     };
 
     // If the DB is missing `first_contacted_at` (migration not applied yet), retry without it.
@@ -497,11 +504,15 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       const isMissingColumn = /does not exist|unknown column|column/i.test(msg);
       const missingFirstContactedAt = /first_contacted_at/i.test(msg) && isMissingColumn;
       const missingAssignee = /assignee/i.test(msg) && isMissingColumn;
+      const missingBudget = /budget/i.test(msg) && isMissingColumn;
+      const missingLinks = /links/i.test(msg) && isMissingColumn;
 
-      if (missingFirstContactedAt || missingAssignee) {
+      if (missingFirstContactedAt || missingAssignee || missingBudget || missingLinks) {
         const copy = { ...(row as unknown as Record<string, unknown>) };
         if (missingFirstContactedAt) delete copy.first_contacted_at;
         if (missingAssignee) delete copy.assignee;
+        if (missingBudget) delete copy.budget;
+        if (missingLinks) delete copy.links;
         const res2 = await insertOnce(copy);
         if (res2.error) throw res2.error;
         inserted = res2.data;
@@ -520,15 +531,11 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
       to_status: 'invite_sent',
       changed_at: (data.first_contacted_at ?? new Date().toISOString()),
     } as never);
-    // Create default "Contact ..." task for new manual lead
-    const contactLabel = [lead.company_name, lead.contact_name].filter(Boolean).join(' – ') || 'lead';
-    await db.from('tasks').insert({ user_id: user.id, lead_id: lead.id, title: `Contact ${contactLabel}`, status: 'pending' } as never);
     return lead;
   }, []);
 
   const updateLead = useCallback(async (id: string, updates: Partial<Lead>) => {
     if (!supabase) return;
-    const lead = leads.find(l => l.id === id);
 
     // Supabase client infers never for table update; cast to satisfy typecheck (build)
     const { error: updateError } = await supabase.from('leads').update(updates as never).eq('id', id);
@@ -536,14 +543,7 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
     if (updateError) throw updateError;
 
     setLeads(prev => prev.map(l => (l.id === id ? { ...l, ...updates } : l)));
-
-    // When user marks a job post as lead, create a task "Contact ..." linked to the lead card
-    if (updates.is_marked_as_lead === true && lead) {
-      const contactLabel = [lead.company_name, lead.contact_name].filter(Boolean).join(' – ') || 'lead';
-      const title = `Contact ${contactLabel}`;
-      await supabase.from('tasks').insert({ user_id: lead.user_id, lead_id: lead.id, title, status: 'pending' } as never);
-    }
-  }, [leads]);
+  }, []);
 
   const deleteLead = useCallback(async (id: string) => {
     if (!supabase) return;
@@ -576,8 +576,31 @@ export function useLeads(options: UseLeadsOptions = {}): UseLeadsReturn {
   }, []);
 
   const updateLeadStatus = useCallback(async (id: string, status: LeadStatus) => {
+    if (!supabase) {
+      await updateLead(id, { status });
+      return;
+    }
+    const lead = leads.find((l) => l.id === id);
+    const prevStatus = lead?.status;
     await updateLead(id, { status });
-  }, [updateLead]);
+
+    // Entering Nurturing → monthly follow-up task on the Tasks board
+    if (status === 'nurturing' && prevStatus !== 'nurturing' && lead) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('tasks').insert({
+          user_id: user.id,
+          lead_id: id,
+          title: NURTURING_FOLLOW_UP_TITLE,
+          status: 'backlog',
+          task_type: NURTURING_TASK_TYPE,
+          due_at: oneMonthFromNowIso(),
+        } as never);
+      }
+    }
+  }, [leads, updateLead]);
 
   const toggleShare = useCallback(async (id: string) => {
     const lead = leads.find(l => l.id === id);

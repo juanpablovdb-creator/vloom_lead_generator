@@ -1,18 +1,14 @@
 // =====================================================
-// Leadflow Vloom - Tasks view (two views: Table + Todo list)
+// Leadflow Vloom - Tasks board (Backlog / In progress / Done)
 // =====================================================
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  CheckSquare,
   Loader2,
-  LayoutGrid,
-  List,
-  Circle,
-  CheckCircle2,
-  Search,
-  Building2,
   Plus,
-  Settings2,
+  Calendar,
+  Building2,
+  User,
+  GripVertical,
 } from 'lucide-react';
 import { useTasks, type TaskWithLead } from '@/hooks/useTasks';
 import { useLeads } from '@/hooks/useLeads';
@@ -20,8 +16,8 @@ import { supabase } from '@/lib/supabase';
 import type { TaskStatus, LeadStatus } from '@/types/database';
 import type { Lead } from '@/types/database';
 import { LeadCardPopup } from '@/components/CRM/LeadCardPopup';
+import { TASK_PRESET_OPTIONS, formatBudget } from '@/lib/taskPresets';
 
-/** CRM pipeline stage labels for the Status column (lead's column on the board) */
 const CRM_STATUS_LABEL: Record<LeadStatus, string> = {
   backlog: 'Backlog',
   not_contacted: 'Not contacted',
@@ -30,33 +26,23 @@ const CRM_STATUS_LABEL: Record<LeadStatus, string> = {
   reply: 'Reply',
   positive_reply: 'Positive reply',
   negotiation: 'Negotiation',
+  nurturing: 'Nurturing',
   closed: 'Closed',
   lost: 'Lost',
   disqualified: 'Disqualified',
 };
 
-type TasksViewMode = 'table' | 'todo';
-type TodoFilter = 'todo' | 'done';
+const BOARD_COLUMNS: { id: TaskStatus; label: string }[] = [
+  { id: 'backlog', label: 'Backlog' },
+  { id: 'in_progress', label: 'In progress' },
+  { id: 'done', label: 'Done' },
+];
 
-const TASKS_VIEW_KEY = 'leadflow_tasks_view';
-const TODO_FILTER_KEY = 'leadflow_tasks_todo_filter';
-
-function getStoredViewMode(): TasksViewMode {
-  try {
-    const v = localStorage.getItem(TASKS_VIEW_KEY);
-    return v === 'todo' ? 'todo' : 'table';
-  } catch {
-    return 'table';
-  }
-}
-
-function getStoredTodoFilter(): TodoFilter {
-  try {
-    const v = localStorage.getItem(TODO_FILTER_KEY);
-    return v === 'done' ? 'done' : 'todo';
-  } catch {
-    return 'todo';
-  }
+function normalizeTaskStatus(raw: string | null | undefined): TaskStatus {
+  const s = (raw ?? '').toLowerCase().trim();
+  if (s === 'in_progress' || s === 'done') return s;
+  if (s === 'pending' || s === 'cancelled') return 'backlog';
+  return 'backlog';
 }
 
 export interface TasksViewProps {
@@ -64,17 +50,27 @@ export interface TasksViewProps {
 }
 
 export function TasksView({ onNavigateToLead: _onNavigateToLead }: TasksViewProps) {
-  const [viewMode, setViewMode] = useState<TasksViewMode>(getStoredViewMode);
-  const [todoFilter, setTodoFilter] = useState<TodoFilter>(getStoredTodoFilter);
-  const [tableSearch, setTableSearch] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createTitle, setCreateTitle] = useState('');
+  const [createPresetId, setCreatePresetId] = useState(TASK_PRESET_OPTIONS[0].id);
   const [createLeadId, setCreateLeadId] = useState('');
   const [createSaving, setCreateSaving] = useState(false);
-  const { tasks, isLoading, error, updateTaskStatus, updateTaskTitle, createTask, deleteTask, refreshTasks } = useTasks();
-  const { leads, updateLead, updateLeadStatus } = useLeads({ initialFilters: { marked_as_lead_only: true }, pageSize: 100 });
+  const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
+  const {
+    tasks,
+    isLoading,
+    error,
+    updateTaskStatus,
+    updateTaskTitle,
+    createTask,
+    deleteTask,
+    refreshTasks,
+  } = useTasks();
+  const { leads, updateLead, updateLeadStatus } = useLeads({
+    initialFilters: { marked_as_lead_only: true },
+    pageSize: 200,
+  });
 
   const openTaskPopup = useCallback((task: TaskWithLead | null) => {
     setSelectedTaskId(task?.id ?? null);
@@ -110,23 +106,64 @@ export function TasksView({ onNavigateToLead: _onNavigateToLead }: TasksViewProp
     };
   }, [selectedTaskId, tasks]);
 
-  const setViewModeAndStore = (mode: TasksViewMode) => {
-    setViewMode(mode);
+  const byColumn = useMemo(() => {
+    const map = new Map<TaskStatus, TaskWithLead[]>();
+    for (const col of BOARD_COLUMNS) map.set(col.id, []);
+    for (const t of tasks) {
+      const st = normalizeTaskStatus(t.status);
+      map.get(st)!.push(t);
+    }
+    return map;
+  }, [tasks]);
+
+  const handleDragStart = (e: React.DragEvent, task: TaskWithLead) => {
+    e.dataTransfer.setData('text/task-id', task.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDrop = async (e: React.DragEvent, status: TaskStatus) => {
+    e.preventDefault();
+    setDragOverColumn(null);
+    const id = e.dataTransfer.getData('text/task-id');
+    if (!id) return;
+    const task = tasks.find((t) => t.id === id);
+    if (!task || normalizeTaskStatus(task.status) === status) return;
+    await updateTaskStatus(id, status);
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createLeadId) return;
+    const preset =
+      TASK_PRESET_OPTIONS.find((p) => p.id === createPresetId) ?? TASK_PRESET_OPTIONS[0];
+    setCreateSaving(true);
     try {
-      localStorage.setItem(TASKS_VIEW_KEY, mode);
-    } catch {
-      // ignore
+      await createTask({
+        leadId: createLeadId,
+        title: preset.title,
+        taskType: preset.id,
+        status: 'backlog',
+      });
+      setShowCreateModal(false);
+      setCreateLeadId('');
+      setCreatePresetId(TASK_PRESET_OPTIONS[0].id);
+    } finally {
+      setCreateSaving(false);
     }
   };
 
-  const setTodoFilterAndStore = (f: TodoFilter) => {
-    setTodoFilter(f);
-    try {
-      localStorage.setItem(TODO_FILTER_KEY, f);
-    } catch {
-      // ignore
-    }
-  };
+  const leadOptions = useMemo(() => {
+    return leads
+      .slice()
+      .sort((a, b) => (a.company_name ?? '').localeCompare(b.company_name ?? ''))
+      .map((l) => ({
+        id: l.id,
+        label:
+          [l.company_name, l.contact_name].filter(Boolean).join(' · ') ||
+          l.job_title ||
+          l.id.slice(0, 8),
+      }));
+  }, [leads]);
 
   if (isLoading) {
     return (
@@ -151,515 +188,228 @@ export function TasksView({ onNavigateToLead: _onNavigateToLead }: TasksViewProp
     );
   }
 
-  const pendingTasks = tasks.filter((t) => t.status === 'pending');
-  const doneTasks = tasks.filter((t) => t.status === 'done' || t.status === 'cancelled');
-
-  const closePopup = () => {
-    setSelectedTaskId(null);
-    setSelectedLead(null);
-  };
-
-  const handleCreateTask = async () => {
-    const leadId = createLeadId || leads[0]?.id;
-    const title = createTitle.trim() || `Contact ${leads.find((l) => l.id === leadId)?.company_name || 'lead'}`;
-    if (!leadId) return;
-    setCreateSaving(true);
-    try {
-      await createTask(leadId, title);
-      setShowCreateModal(false);
-      setCreateTitle('');
-      setCreateLeadId(leads[0]?.id ?? '');
-    } finally {
-      setCreateSaving(false);
-    }
-  };
-
-  const selectedTask = selectedTaskId ? tasks.find((t) => t.id === selectedTaskId) ?? null : null;
-
   return (
-    <div className="p-4 md:p-6 flex flex-col gap-4">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2 mb-4">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setViewModeAndStore('table')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium ${
-                viewMode === 'table'
-                  ? 'bg-vloom-accent/15 text-vloom-accent'
-                  : 'text-vloom-muted hover:text-vloom-text hover:bg-vloom-surface'
-              }`}
-            >
-              <LayoutGrid className="w-4 h-4" />
-              Table
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewModeAndStore('todo')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium ${
-                viewMode === 'todo'
-                  ? 'bg-vloom-accent/15 text-vloom-accent'
-                  : 'text-vloom-muted hover:text-vloom-text hover:bg-vloom-surface'
-              }`}
-            >
-              <List className="w-4 h-4" />
-              Todo
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setShowCreateModal(true);
-              setCreateLeadId(leads[0]?.id ?? '');
-              setCreateTitle('');
-            }}
-            className="inline-flex items-center gap-2 rounded-md bg-vloom-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-vloom-accent/90"
-          >
-            <Plus className="w-4 h-4" />
-            Create task
-          </button>
+    <div className="p-4 md:p-6 space-y-4 h-full min-h-0 flex flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold text-vloom-text">Tasks</h1>
+          <p className="text-sm text-vloom-muted">
+            Drag cards across Backlog → In progress → Done. Open a card for full lead details.
+          </p>
         </div>
-
-        {viewMode === 'table' ? (
-          <TasksTableView
-            tasks={tasks}
-            searchTerm={tableSearch}
-            onSearchChange={setTableSearch}
-            onStatusChange={updateTaskStatus}
-            onDelete={deleteTask}
-            onRefresh={refreshTasks}
-            onOpenTask={(task) => openTaskPopup(task)}
-            onCreateTaskClick={() => setShowCreateModal(true)}
-          />
-        ) : (
-          <TasksTodoView
-            pendingTasks={pendingTasks}
-            doneTasks={doneTasks}
-            todoFilter={todoFilter}
-            onTodoFilterChange={setTodoFilterAndStore}
-            onStatusChange={updateTaskStatus}
-            onDelete={deleteTask}
-            onRefresh={refreshTasks}
-            onOpenTask={(task) => openTaskPopup(task)}
-          />
-        )}
+        <button
+          type="button"
+          onClick={() => setShowCreateModal(true)}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-vloom-accent text-white text-sm font-medium hover:opacity-90"
+        >
+          <Plus className="w-4 h-4" />
+          New task
+        </button>
       </div>
 
-      {selectedLead && selectedTask && (
-        <LeadCardPopup
-          lead={selectedLead}
-          currentTask={selectedTask}
-          tasksForLead={tasks.filter((t) => t.lead_id === selectedLead.id)}
-          onClose={closePopup}
-          onUpdateLead={(id, updates) => updateLead(id, updates)}
-          onUpdateLeadStatus={updateLeadStatus}
-          onUpdateTaskStatus={updateTaskStatus}
-          onUpdateTaskTitle={updateTaskTitle}
-          onDeleteTask={deleteTask}
-          onRefreshTasks={refreshTasks}
-        />
-      )}
-
-      {showCreateModal && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60" onClick={() => setShowCreateModal(false)}>
-          <div
-            className="w-full max-w-md bg-vloom-surface rounded-xl border border-vloom-border p-4 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-lg font-semibold text-vloom-text mb-3">New task</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Lead</label>
-                <select
-                  value={createLeadId}
-                  onChange={(e) => setCreateLeadId(e.target.value)}
-                  className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
-                >
-                  {leads.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.company_name || l.contact_name || l.id.slice(0, 8)}
-                    </option>
-                  ))}
-                </select>
+      <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-3 gap-4">
+        {BOARD_COLUMNS.map((col) => {
+          const colTasks = byColumn.get(col.id) ?? [];
+          return (
+            <div
+              key={col.id}
+              className={`flex flex-col min-h-[280px] rounded-xl border border-vloom-border bg-vloom-surface/50 ${
+                dragOverColumn === col.id ? 'ring-2 ring-vloom-accent/40' : ''
+              }`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOverColumn(col.id);
+              }}
+              onDragLeave={() => setDragOverColumn(null)}
+              onDrop={(e) => handleDrop(e, col.id)}
+            >
+              <div className="px-3 py-2.5 border-b border-vloom-border flex items-center justify-between">
+                <span className="text-sm font-semibold text-vloom-text">{col.label}</span>
+                <span className="text-xs text-vloom-muted tabular-nums">{colTasks.length}</span>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Title</label>
-                <input
-                  type="text"
-                  value={createTitle}
-                  onChange={(e) => setCreateTitle(e.target.value)}
-                  placeholder="E.g. Contact company"
-                  className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
-                />
+              <div className="flex-1 p-2 space-y-2 overflow-y-auto min-h-[200px]">
+                {colTasks.length === 0 && (
+                  <p className="text-xs text-vloom-muted px-1 py-4 text-center">No tasks</p>
+                )}
+                {colTasks.map((task) => (
+                  <TaskBoardCard
+                    key={task.id}
+                    task={task}
+                    onDragStart={handleDragStart}
+                    onOpen={() => openTaskPopup(task)}
+                    onDelete={async () => {
+                      if (!confirm('Delete this task?')) return;
+                      await deleteTask(task.id);
+                    }}
+                  />
+                ))}
               </div>
             </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                onClick={handleCreateTask}
-                disabled={createSaving || !createLeadId || leads.length === 0}
-                className="rounded-md bg-vloom-accent px-4 py-2 text-sm font-medium text-white hover:bg-vloom-accent/90 disabled:opacity-50"
+          );
+        })}
+      </div>
+
+      {showCreateModal && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/60"
+          onClick={() => setShowCreateModal(false)}
+        >
+          <form
+            className="w-full max-w-md rounded-xl border border-vloom-border bg-vloom-surface p-4 space-y-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleCreate}
+          >
+            <h2 className="text-base font-semibold text-vloom-text">New task</h2>
+            <div>
+              <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
+                Task type
+              </label>
+              <select
+                value={createPresetId}
+                onChange={(e) => setCreatePresetId(e.target.value as typeof createPresetId)}
+                className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
               >
-                {createSaving ? 'Creating…' : 'Create'}
-              </button>
+                {TASK_PRESET_OPTIONS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">
+                Lead
+              </label>
+              <select
+                required
+                value={createLeadId}
+                onChange={(e) => setCreateLeadId(e.target.value)}
+                className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+              >
+                <option value="">Select a lead…</option>
+                {leadOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => setShowCreateModal(false)}
-                className="rounded-md border border-vloom-border px-4 py-2 text-sm text-vloom-text"
+                className="px-3 py-2 text-sm text-vloom-muted hover:text-vloom-text rounded-lg border border-vloom-border"
               >
                 Cancel
               </button>
+              <button
+                type="submit"
+                disabled={createSaving || !createLeadId}
+                className="px-3 py-2 text-sm font-medium text-white bg-vloom-accent rounded-lg hover:opacity-90 disabled:opacity-50"
+              >
+                {createSaving ? 'Creating…' : 'Create'}
+              </button>
             </div>
-          </div>
+          </form>
         </div>
+      )}
+
+      {selectedLead && (
+        <LeadCardPopup
+          lead={selectedLead}
+          currentTask={selectedTaskId ? tasks.find((t) => t.id === selectedTaskId) ?? null : null}
+          tasksForLead={tasks.filter((t) => t.lead_id === selectedLead.id)}
+          onClose={() => {
+            setSelectedTaskId(null);
+            setSelectedLead(null);
+          }}
+          onUpdateLead={async (id, updates) => {
+            await updateLead(id, updates);
+            setSelectedLead((prev) => (prev && prev.id === id ? { ...prev, ...updates } : prev));
+          }}
+          onUpdateLeadStatus={updateLeadStatus}
+          onUpdateTaskStatus={updateTaskStatus}
+          onUpdateTaskTitle={updateTaskTitle}
+          onCreateTask={async (leadId, title, taskType) => {
+            await createTask({ leadId, title, taskType: taskType ?? null, status: 'backlog' });
+          }}
+          onDeleteTask={deleteTask}
+        />
       )}
     </div>
   );
 }
 
-// View 1: Tasks table – Status, Title, Associated Contact/Company, CRM Status (no Last contacted, Last engagement, Task type)
-function TasksTableView({
-  tasks,
-  searchTerm,
-  onSearchChange,
-  onStatusChange,
-  onDelete,
-  onRefresh,
-  onOpenTask,
-  onCreateTaskClick,
-}: {
-  tasks: TaskWithLead[];
-  searchTerm: string;
-  onSearchChange: (value: string) => void;
-  onStatusChange: (id: string, status: TaskStatus) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-  onRefresh: () => Promise<void>;
-  onOpenTask: (task: TaskWithLead) => void;
-  onCreateTaskClick: () => void;
-}) {
-  const q = searchTerm.trim().toLowerCase();
-  const filteredTasks =
-    q === '' ? tasks : tasks.filter((t) => t.title.toLowerCase().includes(q));
-
-  return (
-    <>
-      {/* Bar above table: search left, Edit columns right */}
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <div className="flex items-center gap-2 rounded-md border border-vloom-border bg-vloom-surface px-3 py-2 text-sm w-full max-w-md">
-          <Search className="w-4 h-4 text-vloom-muted flex-shrink-0" />
-          <input
-            type="text"
-            placeholder="Search task title and note"
-            className="flex-1 bg-transparent outline-none text-vloom-text placeholder:text-vloom-muted min-w-0"
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
-          />
-        </div>
-        <button
-          type="button"
-          className="flex items-center gap-1.5 px-3 py-2 rounded-md border border-vloom-border bg-vloom-surface text-sm text-vloom-muted hover:text-vloom-text"
-        >
-          <Settings2 className="w-4 h-4" />
-          Edit columns
-        </button>
-      </div>
-
-      {filteredTasks.length === 0 ? (
-        <div className="bg-vloom-surface border border-vloom-border rounded-lg p-8 text-center text-vloom-muted text-sm">
-          {tasks.length === 0 ? 'No tasks yet.' : 'No tasks match your search.'}
-        </div>
-      ) : (
-        <div className="border border-vloom-border rounded-lg overflow-hidden bg-vloom-surface">
-          <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 bg-vloom-border/30 border-b border-vloom-border z-10">
-                <tr>
-                  <th className="w-10 px-3 py-3" aria-label="Select" />
-                  <th className="px-3 py-3 text-xs font-medium text-vloom-muted uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-3 py-3 text-xs font-medium text-vloom-muted uppercase tracking-wider">
-                    Title
-                  </th>
-                  <th className="px-3 py-3 text-xs font-medium text-vloom-muted uppercase tracking-wider">
-                    Associated contact
-                  </th>
-                  <th className="px-3 py-3 text-xs font-medium text-vloom-muted uppercase tracking-wider">
-                    Associated company
-                  </th>
-                  <th className="px-3 py-3 text-xs font-medium text-vloom-muted uppercase tracking-wider">
-                    CRM status
-                  </th>
-                  <th className="w-20 px-3 py-3" aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-vloom-border/50">
-                {filteredTasks.map((task) => {
-                  const leadStatus = task.leads?.status ?? 'backlog';
-                  const crmLabel = CRM_STATUS_LABEL[leadStatus];
-                  return (
-                    <tr
-                      key={task.id}
-                      className="hover:bg-vloom-border/20"
-                    >
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          className="rounded border-vloom-border text-vloom-accent focus:ring-vloom-accent"
-                          aria-label="Select task"
-                        />
-                      </td>
-                      <td className="px-3 py-3">
-                        <TaskStatusIcon
-                          status={task.status}
-                          onMarkDone={() => onStatusChange(task.id, 'done')}
-                        />
-                      </td>
-                      <td className="px-3 py-3">
-                        <button
-                          type="button"
-                          onClick={() => onOpenTask(task)}
-                          className="text-vloom-accent hover:underline font-medium text-left"
-                        >
-                          {task.title}
-                        </button>
-                      </td>
-                      <td className="px-3 py-3 text-vloom-muted">
-                        {task.leads?.contact_name?.trim() || '--'}
-                      </td>
-                      <td className="px-3 py-3 text-vloom-muted">
-                        {task.leads?.company_name?.trim() ? (
-                          <span className="inline-flex items-center gap-1.5 text-vloom-text">
-                            <Building2 className="w-4 h-4 text-vloom-accent/80" />
-                            {task.leads.company_name}
-                          </span>
-                        ) : (
-                          '--'
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-vloom-muted">
-                        {crmLabel}
-                      </td>
-                      <td className="px-3 py-3">
-                        <button
-                          type="button"
-                          onClick={() => onDelete(task.id)}
-                          className="text-xs text-vloom-muted hover:text-vloom-error"
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-4 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => onRefresh()}
-          className="text-sm text-vloom-muted hover:text-vloom-text"
-        >
-          Refresh
-        </button>
-        <button
-          type="button"
-          onClick={onCreateTaskClick}
-          className="text-sm text-vloom-muted hover:text-vloom-accent border border-dashed border-vloom-border rounded-lg px-4 py-2"
-        >
-          + New task
-        </button>
-      </div>
-    </>
-  );
-}
-
-/** Blue circle with check when done; clickable circle when pending (HubSpot-style) */
-function TaskStatusIcon({
-  status,
-  onMarkDone,
-}: {
-  status: TaskStatus;
-  onMarkDone: () => void;
-}) {
-  const isDone = status === 'done' || status === 'cancelled';
-  return (
-    <span className="inline-flex items-center">
-      {isDone ? (
-        <span
-          className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-500/20 text-blue-500"
-          aria-label="Done"
-        >
-          <CheckCircle2 className="h-4 w-4" />
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={onMarkDone}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-full border-2 border-vloom-border text-vloom-muted hover:border-vloom-accent hover:text-vloom-accent"
-          aria-label="Mark done"
-        >
-          <Circle className="h-3.5 w-3.5" />
-        </button>
-      )}
-    </span>
-  );
-}
-
-// View 2: Todo List – same columns as table (Status, Title, Contact, Company, CRM status), click opens popup
-function TasksTodoView({
-  pendingTasks,
-  doneTasks,
-  todoFilter,
-  onTodoFilterChange,
-  onStatusChange,
-  onDelete,
-  onRefresh: _onRefresh,
-  onOpenTask,
-}: {
-  pendingTasks: TaskWithLead[];
-  doneTasks: TaskWithLead[];
-  todoFilter: TodoFilter;
-  onTodoFilterChange: (f: TodoFilter) => void;
-  onStatusChange: (id: string, status: TaskStatus) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-  onRefresh: () => Promise<void>;
-  onOpenTask: (task: TaskWithLead) => void;
-}) {
-  const displayTasks = todoFilter === 'todo' ? pendingTasks : doneTasks;
-
-  return (
-    <>
-      <div className="mb-2">
-        <h1 className="text-base font-semibold text-vloom-text">Todo List</h1>
-        <p className="text-sm text-vloom-muted mt-0.5">Same info as table. Click a row to open the lead card.</p>
-      </div>
-
-      <div className="flex items-center gap-2 mb-4">
-        <button
-          type="button"
-          onClick={() => onTodoFilterChange('todo')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium ${
-            todoFilter === 'todo'
-              ? 'bg-vloom-surface border border-vloom-border text-vloom-text'
-              : 'text-vloom-muted hover:text-vloom-text'
-          }`}
-        >
-          <CheckSquare className="w-4 h-4" />
-          To Do
-          {pendingTasks.length > 0 && (
-            <span className="ml-1 text-sm text-vloom-muted">({pendingTasks.length})</span>
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() => onTodoFilterChange('done')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium ${
-            todoFilter === 'done'
-              ? 'bg-vloom-surface border border-vloom-border text-vloom-text'
-              : 'text-vloom-muted hover:text-vloom-text'
-          }`}
-        >
-          <CheckCircle2 className="w-4 h-4" />
-          Done
-          {doneTasks.length > 0 && (
-            <span className="ml-1 text-sm text-vloom-muted">({doneTasks.length})</span>
-          )}
-        </button>
-      </div>
-
-      {displayTasks.length === 0 ? (
-        <div className="bg-vloom-surface border border-vloom-border rounded-lg p-6 text-center text-vloom-muted text-sm">
-          {todoFilter === 'todo' ? 'No tasks to do.' : 'No completed tasks.'}
-        </div>
-      ) : (
-        <div className="border border-vloom-border rounded-lg overflow-hidden bg-vloom-surface">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-vloom-border/30 border-b border-vloom-border">
-                <tr>
-                  <th className="px-3 py-2 text-xs font-medium text-vloom-muted uppercase tracking-wider">Status</th>
-                  <th className="px-3 py-2 text-xs font-medium text-vloom-muted uppercase tracking-wider">Title</th>
-                  <th className="px-3 py-2 text-xs font-medium text-vloom-muted uppercase tracking-wider">Contact</th>
-                  <th className="px-3 py-2 text-xs font-medium text-vloom-muted uppercase tracking-wider">Company</th>
-                  <th className="px-3 py-2 text-xs font-medium text-vloom-muted uppercase tracking-wider">CRM status</th>
-                  <th className="w-16 px-3 py-2" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-vloom-border/50">
-                {displayTasks.map((task) => (
-                  <TodoTaskRow
-                    key={task.id}
-                    task={task}
-                    onToggleDone={() => onStatusChange(task.id, task.status === 'pending' ? 'done' : 'pending')}
-                    onDelete={() => onDelete(task.id)}
-                    onOpen={() => onOpenTask(task)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-function TodoTaskRow({
+function TaskBoardCard({
   task,
-  onToggleDone,
-  onDelete,
+  onDragStart,
   onOpen,
+  onDelete,
 }: {
   task: TaskWithLead;
-  onToggleDone: () => void;
-  onDelete: () => void;
+  onDragStart: (e: React.DragEvent, task: TaskWithLead) => void;
   onOpen: () => void;
+  onDelete: () => void;
 }) {
-  const isChecked = task.status === 'done' || task.status === 'cancelled';
-  const leadStatus = task.leads?.status ?? 'backlog';
-  const crmLabel = CRM_STATUS_LABEL[leadStatus];
+  const company = task.leads?.company_name?.trim() || null;
+  const contact = task.leads?.contact_name?.trim() || null;
+  const crmStatus = task.leads?.status
+    ? CRM_STATUS_LABEL[task.leads.status] ?? task.leads.status
+    : null;
+  const due =
+    task.due_at != null
+      ? new Date(task.due_at).toLocaleDateString(undefined, { dateStyle: 'medium' })
+      : null;
+  const budget =
+    task.leads?.budget != null && Number.isFinite(Number(task.leads.budget))
+      ? formatBudget(Number(task.leads.budget))
+      : null;
 
   return (
-    <tr
-      className="hover:bg-vloom-border/20 cursor-pointer"
+    <div
+      draggable
+      onDragStart={(e) => onDragStart(e, task)}
       onClick={onOpen}
+      className="rounded-lg border border-vloom-border bg-vloom-bg p-3 cursor-pointer hover:border-vloom-accent/50 transition-colors space-y-1.5"
     >
-      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-        <TaskStatusIcon status={task.status} onMarkDone={onToggleDone} />
-      </td>
-      <td className="px-3 py-2">
-        <span className={`font-medium text-vloom-accent hover:underline ${isChecked ? 'text-vloom-muted line-through' : 'text-vloom-text'}`}>
-          {task.title}
-        </span>
-      </td>
-      <td className="px-3 py-2 text-vloom-muted">
-        {task.leads?.contact_name?.trim() || '--'}
-      </td>
-      <td className="px-3 py-2 text-vloom-muted">
-        {task.leads?.company_name?.trim() ? (
-          <span className="inline-flex items-center gap-1.5 text-vloom-text">
-            <Building2 className="w-4 h-4 text-vloom-accent/80" />
-            {task.leads.company_name}
-          </span>
-        ) : (
-          '--'
-        )}
-      </td>
-      <td className="px-3 py-2 text-vloom-muted">{crmLabel}</td>
-      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="text-xs text-vloom-muted hover:text-vloom-error"
-        >
-          Delete
-        </button>
-      </td>
-    </tr>
+      <div className="flex items-start gap-1.5">
+        <GripVertical className="w-3.5 h-3.5 text-vloom-muted shrink-0 mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-vloom-text leading-snug">{task.title}</div>
+          {company && (
+            <div className="flex items-center gap-1 text-xs text-vloom-muted mt-1 truncate">
+              <Building2 className="w-3 h-3 shrink-0" />
+              <span className="truncate">{company}</span>
+            </div>
+          )}
+          {contact && contact !== company && (
+            <div className="flex items-center gap-1 text-xs text-vloom-muted truncate">
+              <User className="w-3 h-3 shrink-0" />
+              <span className="truncate">{contact}</span>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1 text-[11px] text-vloom-muted">
+            {crmStatus && <span>{crmStatus}</span>}
+            {budget && budget !== '—' && <span>{budget}</span>}
+            {due && (
+              <span className="inline-flex items-center gap-0.5">
+                <Calendar className="w-3 h-3" />
+                Due {due}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        className="text-[11px] text-vloom-muted hover:text-red-400"
+      >
+        Delete
+      </button>
+    </div>
   );
 }

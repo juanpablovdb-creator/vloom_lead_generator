@@ -12,6 +12,7 @@ import type { Lead, LeadStatus } from '@/types/database';
 import type { LeadStatusHistory } from '@/types/database';
 import type { TaskWithLead } from '@/hooks/useTasks';
 import type { TaskStatus } from '@/types/database';
+import { TASK_PRESET_OPTIONS, type TaskPresetId } from '@/lib/taskPresets';
 
 const CRM_STATUS_LABEL: Record<LeadStatus, string> = {
   backlog: 'Backlog',
@@ -21,6 +22,7 @@ const CRM_STATUS_LABEL: Record<LeadStatus, string> = {
   reply: 'Reply',
   positive_reply: 'Positive reply',
   negotiation: 'Negotiation',
+  nurturing: 'Nurturing',
   closed: 'Closed',
   lost: 'Lost',
   disqualified: 'Disqualified',
@@ -34,6 +36,7 @@ const LEAD_STATUS_OPTIONS: LeadStatus[] = [
   'reply',
   'positive_reply',
   'negotiation',
+  'nurturing',
   'closed',
   'lost',
   'disqualified',
@@ -121,7 +124,8 @@ export interface LeadCardPopupProps {
   onUpdateTaskStatus?: (taskId: string, status: TaskStatus) => Promise<void>;
   onUpdateTaskTitle?: (taskId: string, title: string) => Promise<void>;
   onDeleteTask?: (taskId: string) => Promise<void>;
-  onCreateTask?: (leadId: string, title: string) => Promise<void>;
+  /** Create a task for this lead (title + optional preset id). */
+  onCreateTask?: (leadId: string, title: string, taskType?: string) => Promise<void>;
   onRefreshTasks?: () => Promise<void>;
 }
 
@@ -142,6 +146,16 @@ export function LeadCardPopup({
   const [localLead, setLocalLead] = useState(lead);
   const [statusHistory, setStatusHistory] = useState<LeadStatusHistory[]>([]);
   const [otherContactsAtCompany, setOtherContactsAtCompany] = useState<Pick<Lead, 'id' | 'contact_name' | 'contact_email' | 'company_name'>[]>([]);
+  const [newTaskPresetId, setNewTaskPresetId] = useState<TaskPresetId>(TASK_PRESET_OPTIONS[0].id);
+  const [creatingTask, setCreatingTask] = useState(false);
+
+  useEffect(() => {
+    setLocalLead({
+      ...lead,
+      links: Array.isArray(lead.links) ? lead.links : [],
+      budget: lead.budget ?? null,
+    });
+  }, [lead]);
 
   const channelSummaryLabel = useMemo(() => {
     const c = localLead.channel?.trim();
@@ -232,7 +246,7 @@ export function LeadCardPopup({
       const label = fromLabel ? `Moved to ${toLabel} (from ${fromLabel})` : `Moved to ${toLabel}`;
       items.push({ label, date: formatDate(h.changed_at), sortKey: h.changed_at });
     });
-    tasksForLead.filter((t) => t.status === 'done' || t.status === 'cancelled').forEach((t) => {
+    tasksForLead.filter((t) => t.status === 'done').forEach((t) => {
       items.push({ label: `Task completed: ${t.title}`, date: formatDate(t.updated_at), sortKey: t.updated_at });
     });
     items.sort((a, b) => (b.sortKey ?? '').localeCompare(a.sortKey ?? ''));
@@ -243,7 +257,18 @@ export function LeadCardPopup({
     <>
       <div>
         <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Company</div>
-        <div className="text-sm text-vloom-text">{localLead.company_name || '—'}</div>
+        <input
+          type="text"
+          value={localLead.company_name ?? ''}
+          onChange={(e) => setLocalLead({ ...localLead, company_name: e.target.value })}
+          onBlur={async () => {
+            const v = (localLead.company_name ?? '').trim() || null;
+            await onUpdateLead(localLead.id, { company_name: v });
+            setLocalLead((prev) => ({ ...prev, company_name: v }));
+          }}
+          placeholder="Company name"
+          className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+        />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -271,24 +296,59 @@ export function LeadCardPopup({
           </select>
         </div>
         <div>
+          <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Budget (USD)</div>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={localLead.budget != null ? String(localLead.budget) : ''}
+            onChange={(e) => {
+              const raw = e.target.value;
+              const n = raw === '' ? null : Number(raw);
+              setLocalLead((prev) => ({
+                ...prev,
+                budget: n != null && Number.isFinite(n) ? n : null,
+              }));
+            }}
+            onBlur={async () => {
+              const n = localLead.budget;
+              await onUpdateLead(localLead.id, {
+                budget: n != null && Number.isFinite(n) ? n : null,
+              });
+            }}
+            placeholder="e.g. 5000"
+            className="w-full max-w-xs rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+          />
+        </div>
+        <div>
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Website</div>
-          {localLead.company_url ? (
-            <a href={localLead.company_url} target="_blank" rel="noopener noreferrer" className="text-sm text-vloom-accent hover:underline break-all">
-              {localLead.company_url}
-            </a>
-          ) : (
-            <div className="text-sm text-vloom-muted">—</div>
-          )}
+          <input
+            type="url"
+            value={localLead.company_url ?? ''}
+            onChange={(e) => setLocalLead({ ...localLead, company_url: e.target.value })}
+            onBlur={async () => {
+              const v = (localLead.company_url ?? '').trim() || null;
+              await onUpdateLead(localLead.id, { company_url: v });
+              setLocalLead((prev) => ({ ...prev, company_url: v }));
+            }}
+            placeholder="https://…"
+            className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+          />
         </div>
         <div>
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Company LinkedIn</div>
-          {localLead.company_linkedin_url ? (
-            <a href={localLead.company_linkedin_url} target="_blank" rel="noopener noreferrer" className="text-sm text-vloom-accent hover:underline">
-              Company LinkedIn
-            </a>
-          ) : (
-            <div className="text-sm text-vloom-muted">—</div>
-          )}
+          <input
+            type="url"
+            value={localLead.company_linkedin_url ?? ''}
+            onChange={(e) => setLocalLead({ ...localLead, company_linkedin_url: e.target.value })}
+            onBlur={async () => {
+              const v = (localLead.company_linkedin_url ?? '').trim() || null;
+              await onUpdateLead(localLead.id, { company_linkedin_url: v });
+              setLocalLead((prev) => ({ ...prev, company_linkedin_url: v }));
+            }}
+            placeholder="https://linkedin.com/company/…"
+            className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+          />
         </div>
         <div>
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Revenue / funding</div>
@@ -302,34 +362,104 @@ export function LeadCardPopup({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Contact</div>
-          <div className="text-sm text-vloom-text">{localLead.contact_name || '—'}</div>
+          <input
+            type="text"
+            value={localLead.contact_name ?? ''}
+            onChange={(e) => setLocalLead({ ...localLead, contact_name: e.target.value })}
+            onBlur={async () => {
+              const v = (localLead.contact_name ?? '').trim() || null;
+              await onUpdateLead(localLead.id, { contact_name: v });
+              setLocalLead((prev) => ({ ...prev, contact_name: v }));
+            }}
+            placeholder="Contact name"
+            className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+          />
         </div>
         <div>
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Contact email</div>
-          {localLead.contact_email ? (
-            <a href={`mailto:${localLead.contact_email}`} className="text-sm text-vloom-accent hover:underline break-all">
-              {localLead.contact_email}
-            </a>
-          ) : (
-            <div className="text-sm text-vloom-muted">—</div>
+          <input
+            type="email"
+            value={localLead.contact_email ?? ''}
+            onChange={(e) => setLocalLead({ ...localLead, contact_email: e.target.value })}
+            onBlur={async () => {
+              const v = (localLead.contact_email ?? '').trim() || null;
+              await onUpdateLead(localLead.id, { contact_email: v });
+              setLocalLead((prev) => ({ ...prev, contact_email: v }));
+            }}
+            placeholder="name@company.com"
+            className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+          />
+        </div>
+        <div>
+          <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Contact LinkedIn</div>
+          <input
+            type="url"
+            value={localLead.contact_linkedin_url ?? ''}
+            onChange={(e) => setLocalLead({ ...localLead, contact_linkedin_url: e.target.value })}
+            onBlur={async () => {
+              const v = (localLead.contact_linkedin_url ?? '').trim() || null;
+              await onUpdateLead(localLead.id, { contact_linkedin_url: v });
+              setLocalLead((prev) => ({ ...prev, contact_linkedin_url: v }));
+            }}
+            placeholder="https://linkedin.com/in/…"
+            className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+          />
+        </div>
+        <div>
+          <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Job post URL</div>
+          <input
+            type="url"
+            value={localLead.job_url ?? ''}
+            onChange={(e) => setLocalLead({ ...localLead, job_url: e.target.value })}
+            onBlur={async () => {
+              const v = (localLead.job_url ?? '').trim() || null;
+              await onUpdateLead(localLead.id, { job_url: v });
+              setLocalLead((prev) => ({ ...prev, job_url: v }));
+            }}
+            placeholder="https://linkedin.com/jobs/…"
+            className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text"
+          />
+        </div>
+        <div className="md:col-span-2">
+          <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Links</div>
+          <textarea
+            value={(localLead.links ?? []).join('\n')}
+            onChange={(e) => {
+              const lines = e.target.value.split(/\r?\n/);
+              setLocalLead((prev) => ({ ...prev, links: lines }));
+            }}
+            onBlur={async () => {
+              const cleaned = (localLead.links ?? [])
+                .map((s) => s.trim())
+                .filter(Boolean);
+              await onUpdateLead(localLead.id, { links: cleaned });
+              setLocalLead((prev) => ({ ...prev, links: cleaned }));
+            }}
+            rows={3}
+            placeholder={'One URL per line\nhttps://example.com/deck\nhttps://…'}
+            className="w-full rounded-md border border-vloom-border bg-vloom-bg px-3 py-2 text-sm text-vloom-text resize-y"
+          />
+          <p className="mt-1 text-xs text-vloom-muted">Decks, samples, docs, or any missing LinkedIn/job URLs.</p>
+          {(localLead.links ?? []).filter((l) => l.trim()).length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {(localLead.links ?? [])
+                .map((l) => l.trim())
+                .filter(Boolean)
+                .map((url) => (
+                  <li key={url}>
+                    <a
+                      href={url.startsWith('http') ? url : `https://${url}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-vloom-accent hover:underline break-all"
+                    >
+                      {url}
+                    </a>
+                  </li>
+                ))}
+            </ul>
           )}
         </div>
-        {localLead.contact_linkedin_url && (
-          <div>
-            <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Contact LinkedIn</div>
-            <a href={localLead.contact_linkedin_url} target="_blank" rel="noopener noreferrer" className="text-sm text-vloom-accent hover:underline">
-              Open profile
-            </a>
-          </div>
-        )}
-        {localLead.job_url && (
-          <div>
-            <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Job post</div>
-            <a href={localLead.job_url} target="_blank" rel="noopener noreferrer" className="text-sm text-vloom-accent hover:underline break-all">
-              {localLead.job_url}
-            </a>
-          </div>
-        )}
         <div>
           <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-1">Channel</div>
           <div className="text-sm text-vloom-text">{channelSummaryLabel || '—'}</div>
@@ -628,26 +758,32 @@ export function LeadCardPopup({
             <div className="pt-2 border-t border-vloom-border">
               <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-2">Tasks</div>
               {tasksForLead.length === 0 ? (
-                <p className="text-sm text-vloom-muted">No tasks.</p>
+                <p className="text-sm text-vloom-muted mb-2">No tasks yet.</p>
               ) : (
-                <ul className="space-y-2">
+                <ul className="space-y-2 mb-3">
                   {tasksForLead.map((t) => (
                     <li key={t.id} className="flex items-center gap-2 text-sm">
                       {onUpdateTaskStatus && (
                         <button
                           type="button"
-                          onClick={() => onUpdateTaskStatus(t.id, t.status === 'pending' ? 'done' : 'pending')}
+                          onClick={() =>
+                            onUpdateTaskStatus(t.id, t.status === 'done' ? 'backlog' : 'done')
+                          }
                           className="flex-shrink-0"
+                          title={t.status === 'done' ? 'Mark backlog' : 'Mark done'}
                         >
-                          {t.status === 'done' || t.status === 'cancelled' ? (
+                          {t.status === 'done' ? (
                             <CheckCircle2 className="w-4 h-4 text-vloom-accent" />
                           ) : (
                             <Circle className="w-4 h-4 text-vloom-muted" />
                           )}
                         </button>
                       )}
-                      <span className={t.status === 'done' || t.status === 'cancelled' ? 'text-vloom-muted line-through' : 'text-vloom-text'}>
+                      <span className={t.status === 'done' ? 'text-vloom-muted line-through' : 'text-vloom-text'}>
                         {t.title}
+                      </span>
+                      <span className="text-[10px] uppercase text-vloom-muted">
+                        {t.status === 'in_progress' ? 'In progress' : t.status}
                       </span>
                       {onDeleteTask && (
                         <button
@@ -663,17 +799,43 @@ export function LeadCardPopup({
                 </ul>
               )}
               {onCreateTask && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const title = `Contact ${[localLead.company_name, localLead.contact_name].filter(Boolean).join(' – ') || 'lead'}`;
-                    await onCreateTask(localLead.id, title);
-                    await onRefreshTasks?.();
-                  }}
-                  className="mt-2 text-sm text-vloom-accent hover:underline"
-                >
-                  + Add task
-                </button>
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-[12rem] flex-1">
+                    <label className="block text-[10px] font-medium text-vloom-muted uppercase tracking-wider mb-1">
+                      New task
+                    </label>
+                    <select
+                      value={newTaskPresetId}
+                      onChange={(e) => setNewTaskPresetId(e.target.value as TaskPresetId)}
+                      className="w-full rounded-md border border-vloom-border bg-vloom-bg px-2 py-1.5 text-sm text-vloom-text"
+                    >
+                      {TASK_PRESET_OPTIONS.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={creatingTask}
+                    onClick={async () => {
+                      const preset =
+                        TASK_PRESET_OPTIONS.find((p) => p.id === newTaskPresetId) ??
+                        TASK_PRESET_OPTIONS[0];
+                      setCreatingTask(true);
+                      try {
+                        await onCreateTask(localLead.id, preset.title, preset.id);
+                        await onRefreshTasks?.();
+                      } finally {
+                        setCreatingTask(false);
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-md bg-vloom-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                  >
+                    {creatingTask ? 'Adding…' : 'Add task'}
+                  </button>
+                </div>
               )}
             </div>
 
@@ -683,13 +845,17 @@ export function LeadCardPopup({
                 <div className="text-xs font-medium text-vloom-muted uppercase tracking-wider mb-2">This task</div>
                 <div className="flex flex-wrap gap-2 items-center">
                   <select
-                    value={currentTask.status}
+                    value={
+                      currentTask.status === 'in_progress' || currentTask.status === 'done'
+                        ? currentTask.status
+                        : 'backlog'
+                    }
                     onChange={(e) => onUpdateTaskStatus(currentTask.id, e.target.value as TaskStatus)}
                     className="rounded-md border border-vloom-border bg-vloom-bg px-2 py-1 text-sm text-vloom-text"
                   >
-                    <option value="pending">Pending</option>
+                    <option value="backlog">Backlog</option>
+                    <option value="in_progress">In progress</option>
                     <option value="done">Done</option>
-                    <option value="cancelled">Cancelled</option>
                   </select>
                   {onDeleteTask && (
                     <button

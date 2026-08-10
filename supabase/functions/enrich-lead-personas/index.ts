@@ -430,14 +430,6 @@ Deno.serve(async (req: Request) => {
         }
 
         leadsCreated++;
-
-        const taskTitle = `Contact ${[template.company_name, contactName].filter(Boolean).join(" – ") || "lead"}`;
-        await supabase.from("tasks").insert({
-          user_id: template.user_id,
-          lead_id: (inserted as { id: string }).id,
-          title: taskTitle,
-          status: "pending",
-        } as never);
       }
     }
 

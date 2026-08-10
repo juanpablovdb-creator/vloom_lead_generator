@@ -37,6 +37,7 @@ const STATUS_OPTIONS: { value: LeadStatus; label: string }[] = [
   { value: 'reply', label: 'Reply' },
   { value: 'positive_reply', label: 'Positive reply' },
   { value: 'negotiation', label: 'Negotiation' },
+  { value: 'nurturing', label: 'Nurturing' },
   { value: 'closed', label: 'Closed' },
   { value: 'lost', label: 'Lost' },
 ];

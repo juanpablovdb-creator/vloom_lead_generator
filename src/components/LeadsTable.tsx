@@ -89,6 +89,7 @@ const STATUS_CONFIG: Record<LeadStatus, { label: string; className: string }> = 
   reply: { label: 'Reply', className: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
   positive_reply: { label: 'Positive reply', className: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
   negotiation: { label: 'Negotiation', className: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
+  nurturing: { label: 'Nurturing', className: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' },
   closed: { label: 'Closed', className: 'bg-teal-500/20 text-teal-300 border-teal-500/30' },
   lost: { label: 'Lost', className: 'bg-red-500/20 text-red-300 border-red-500/30' },
   disqualified: { label: 'Disqualified', className: 'bg-vloom-border/50 text-vloom-muted border-vloom-border' },

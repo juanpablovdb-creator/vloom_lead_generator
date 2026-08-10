@@ -23,6 +23,7 @@ const NON_DISQUALIFIED_STATUSES: LeadStatus[] = [
   'reply',
   'positive_reply',
   'negotiation',
+  'nurturing',
   'closed',
   'lost',
 ] as const;

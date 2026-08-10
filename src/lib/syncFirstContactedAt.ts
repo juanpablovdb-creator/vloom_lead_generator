@@ -12,6 +12,7 @@ const FUNNEL_STATUSES: LeadStatus[] = [
   'reply',
   'positive_reply',
   'negotiation',
+  'nurturing',
   'closed',
   'lost',
 ];

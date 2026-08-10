@@ -267,6 +267,7 @@ const KPI_COHORT_STATUSES: LeadStatus[] = [
   'reply',
   'positive_reply',
   'negotiation',
+  'nurturing',
   'closed',
   'lost',
 ];

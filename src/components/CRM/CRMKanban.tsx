@@ -4,6 +4,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { CRMCard } from './CRMCard';
 import type { Lead, LeadStatus } from '@/types/database';
+import { formatBudget, sumLeadBudgets } from '@/lib/taskPresets';
 
 function stageDotColor(status: LeadStatus): string {
   switch (status) {
@@ -21,6 +22,8 @@ function stageDotColor(status: LeadStatus): string {
       return 'hsl(var(--stage-positive-reply))';
     case 'negotiation':
       return 'hsl(var(--stage-negotiation))';
+    case 'nurturing':
+      return 'hsl(var(--stage-connected))';
     case 'closed':
       return 'hsl(var(--stage-closed))';
     case 'lost':
@@ -40,6 +43,7 @@ const PIPELINE_STAGES: { id: LeadStatus; label: string }[] = [
   { id: 'reply', label: 'Reply' },
   { id: 'positive_reply', label: 'Positive reply' },
   { id: 'negotiation', label: 'Negotiation' },
+  { id: 'nurturing', label: 'Nurturing' },
   { id: 'closed', label: 'Closed' },
   { id: 'lost', label: 'Lost' },
   { id: 'disqualified', label: 'Disqualified' },
@@ -49,6 +53,8 @@ interface CRMKanbanProps {
   leads: Lead[];
   isLoading: boolean;
   firstContactAtByLeadId?: Map<string, string> | null;
+  /** lead_id → open task titles (not done). */
+  openTasksByLeadId?: Map<string, string[]>;
   onStatusChange: (leadId: string, status: LeadStatus) => Promise<void>;
   onUpdateLead?: (id: string, updates: Partial<Lead>) => Promise<void>;
   onOpenLead?: (lead: Lead) => void;
@@ -60,6 +66,7 @@ export function CRMKanban({
   leads,
   isLoading,
   firstContactAtByLeadId,
+  openTasksByLeadId,
   onStatusChange,
   onUpdateLead,
   onOpenLead,
@@ -132,7 +139,12 @@ export function CRMKanban({
       className="flex gap-4 overflow-x-auto pb-4 h-[80vh]"
       onDragEnd={handleDragEnd}
     >
-      {PIPELINE_STAGES.map(({ id, label }) => (
+      {PIPELINE_STAGES.map(({ id, label }) => {
+          const stageLeads = leadsByStatus.get(id) ?? [];
+          const showBudget =
+            id === 'positive_reply' || id === 'negotiation';
+          const budgetWeight = showBudget ? sumLeadBudgets(stageLeads) : 0;
+          return (
         <div
           key={id}
           onDragOver={(e) => handleDragOver(e, id)}
@@ -140,11 +152,19 @@ export function CRMKanban({
           onDrop={(e) => handleDrop(e, id)}
           className="flex-shrink-0 w-72 flex flex-col"
         >
-          <div className="flex items-center gap-2 mb-3 px-1 flex-shrink-0">
+          <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0">
             <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: stageDotColor(id) }} />
             <h3 className="text-xs font-semibold text-foreground uppercase tracking-wider">{label}</h3>
-            <span className="text-xs text-muted-foreground ml-auto">({leadsByStatus.get(id)?.length ?? 0})</span>
+            <span className="text-xs text-muted-foreground ml-auto">({stageLeads.length})</span>
           </div>
+          {showBudget && (
+            <div className="px-1 mb-2 text-[11px] text-muted-foreground">
+              Pipeline weight:{' '}
+              <span className="font-semibold text-foreground tabular-nums">
+                {formatBudget(budgetWeight)}
+              </span>
+            </div>
+          )}
           <div
             className={`space-y-3 flex-1 overflow-y-auto pr-1 min-h-[120px] rounded-lg border transition-colors ${
               dragOverColumn === id ? 'border-primary bg-primary/5' : 'border-transparent bg-background/20'
@@ -153,11 +173,12 @@ export function CRMKanban({
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, id)}
           >
-            {(leadsByStatus.get(id) ?? []).map((lead) => (
+            {stageLeads.map((lead) => (
               <CRMCard
                 key={lead.id}
                 lead={lead}
                 firstContactAt={firstContactAtByLeadId?.get(lead.id) ?? lead.first_contacted_at}
+                openTasks={openTasksByLeadId?.get(lead.id) ?? []}
                 onDragStart={handleDragStart}
                 onUpdateLead={onUpdateLead}
                 onOpen={onOpenLead}
@@ -167,7 +188,8 @@ export function CRMKanban({
             ))}
           </div>
         </div>
-      ))}
+          );
+        })}
     </div>
   );
 }

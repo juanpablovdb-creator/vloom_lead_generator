@@ -89,6 +89,9 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] Post Feeds: Edge sin scrape de perfiles + cap 100 posts + fallback navegador en idle timeout 150s
 - [x] Blocklist default: boards India (Ahmedabad/Jharkhand/West Bengal/Hyderabad/Punjab/Haryana/Bihar/India Abroad)
 - [x] KPIs: alinear First contact con CRM (`first_contacted_at` + paginación; sin marked-only / sin updated_at)
+- [x] CRM: budget + pipeline weight (Positive reply / Negotiation); stage Nurturing + monthly follow-up task
+- [x] Tasks: wipe old tasks; board Backlog / In progress / Done; presets; open card → lead; chips on CRM cards
+- [x] Lead popup: editable links + company/contact/LinkedIn/job URLs when scrape missed data
 
 ---
 
