@@ -144,6 +144,7 @@ function mapPostedLimitToApify(postedLimit: string): string {
   if (!s) return "week";
   if (s === "any" || s.includes("any")) return "any";
   if (s.includes("1h") || s.includes("1 hour") || s.includes("past 1 hour")) return "1h";
+  if (s === "72h" || s.includes("72 hour") || s.includes("past 72") || s.includes("3 day")) return "72h";
   if (s.includes("24h") || s.includes("24 hours") || s.includes("past 24")) return "24h";
   if (s.includes("week") || s.includes("past week")) return "week";
   if (s.includes("month") || s.includes("past month")) return "month";
@@ -153,10 +154,43 @@ function mapPostedLimitToApify(postedLimit: string): string {
   return "week";
 }
 
+function resolvePostFeedPostedFilter(postedLimitRaw: string): {
+  postedLimit?: string;
+  postedLimitDate?: string;
+  postedLimitUi: string;
+} {
+  const ui = str(postedLimitRaw || "week");
+  const mapped = mapPostedLimitToApify(ui);
+  if (mapped === "72h") {
+    const d = new Date(Date.now() - 72 * 60 * 60 * 1000);
+    return {
+      postedLimitUi: ui || "72h",
+      postedLimit: "week",
+      postedLimitDate: d.toISOString(),
+    };
+  }
+  if (mapped === "any") return { postedLimitUi: ui || "any" };
+  return { postedLimitUi: ui, postedLimit: mapped };
+}
+
+function isPast72HoursPostedLimit(postedLimit: string | null | undefined): boolean {
+  const s = (postedLimit || "").toLowerCase().trim();
+  return s === "72h" || s.includes("72 hour") || s.includes("past 72") || s.includes("3 day");
+}
+
+function postedAtWithinLastHours(postedAt: string | null | undefined, hours: number): boolean {
+  if (!postedAt) return true;
+  const t = Date.parse(postedAt);
+  if (!Number.isFinite(t)) return true;
+  return t >= Date.now() - hours * 60 * 60 * 1000;
+}
+
 function buildSearchParams(input: Record<string, unknown>): {
   searchQueries: string[];
   maxPosts: number;
-  postedLimit: string;
+  postedLimit?: string;
+  postedLimitDate?: string;
+  postedLimitUi: string;
   sortBy: "relevance" | "date";
   authorLocations: string[];
   authorLocationMode: "include" | "exclude";
@@ -175,7 +209,7 @@ function buildSearchParams(input: Record<string, unknown>): {
   const maxPosts = Math.min(Math.max(1, maxPostsParsed), EDGE_MAX_POSTS);
   const sortByRaw = str(input.sortBy ?? input.sort ?? "date").toLowerCase();
   const sortBy = sortByRaw === "relevance" ? "relevance" : "date";
-  const postedLimit = mapPostedLimitToApify(str(input.postedLimit ?? "week"));
+  const timeFilter = resolvePostFeedPostedFilter(str(input.postedLimit ?? "week"));
   const authorLocations = toArray(input.authorLocations ?? input.locations ?? []);
   const authorLocationModeRaw = str(input.authorLocationMode ?? "include").toLowerCase().trim();
   const authorLocationMode = authorLocationModeRaw === "exclude" ? "exclude" : "include";
@@ -193,7 +227,9 @@ function buildSearchParams(input: Record<string, unknown>): {
   return {
     searchQueries,
     maxPosts,
-    postedLimit,
+    postedLimit: timeFilter.postedLimit,
+    postedLimitDate: timeFilter.postedLimitDate,
+    postedLimitUi: timeFilter.postedLimitUi,
     sortBy,
     authorLocations,
     authorLocationMode,
@@ -529,10 +565,11 @@ Deno.serve(async (req: Request) => {
     const searchQuery = params.searchQueries.join(", ");
     const searchFilters: Record<string, unknown> = {
       searchQueries: params.searchQueries,
-      postedLimit: params.postedLimit,
+      postedLimit: params.postedLimitUi,
       maxPosts: params.maxPosts,
       sortBy: params.sortBy,
     };
+    if (params.postedLimitDate) searchFilters.postedLimitDate = params.postedLimitDate;
     if (params.authorLocations?.length) searchFilters.authorLocations = params.authorLocations;
     if (params.contentType) searchFilters.contentType = params.contentType;
     if (params.authorUrls?.length) searchFilters.authorUrls = params.authorUrls;
@@ -625,9 +662,10 @@ Deno.serve(async (req: Request) => {
       const apifyInput: Record<string, unknown> = {
         searchQueries: params.searchQueries,
         maxPosts: params.maxPosts,
-        postedLimit: params.postedLimit,
         sortBy: params.sortBy,
       };
+      if (params.postedLimit) apifyInput.postedLimit = params.postedLimit;
+      if (params.postedLimitDate) apifyInput.postedLimitDate = params.postedLimitDate;
       if (params.contentType) apifyInput.contentType = params.contentType;
       if (params.authorUrls?.length) apifyInput.authorUrls = params.authorUrls;
       if (params.authorsCompanies?.length) apifyInput.authorsCompanies = params.authorsCompanies;
@@ -717,7 +755,10 @@ Deno.serve(async (req: Request) => {
         throw new Error("No dataset ID from Apify run. Try again in a moment.");
       }
 
-      const posts = normalizeLinkedInPosts(items);
+      const postsRaw = normalizeLinkedInPosts(items);
+      const posts = isPast72HoursPostedLimit(params.postedLimitUi)
+        ? postsRaw.filter((p) => postedAtWithinLastHours(p.postedAt, 72))
+        : postsRaw;
       const totalFromApify = posts.length;
       console.log("[run-linkedin-post-feed] apify items", items.length, "normalized", posts.length);
 

@@ -194,6 +194,19 @@ export async function importLinkedInJobsFromItems(options: {
   const { supabase, scrapingJobId, userId, items, searchFilters } = options;
 
   let jobs = normalizeHarvestApiJobs(items);
+  const postedLimitUi = String(searchFilters.postedLimit ?? "");
+  if (
+    postedLimitUi.toLowerCase().includes("72") ||
+    postedLimitUi.toLowerCase().includes("3 day")
+  ) {
+    const cutoff = Date.now() - 72 * 60 * 60 * 1000;
+    jobs = jobs.filter((job) => {
+      if (!job.postedAt) return true;
+      const t = Date.parse(job.postedAt);
+      if (!Number.isFinite(t)) return true;
+      return t >= cutoff;
+    });
+  }
   const normalizedExclude = buildExcludeDomainSet(searchFilters);
   if (normalizedExclude.size > 0) {
     jobs = jobs.filter((job) => {

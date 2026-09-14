@@ -1,12 +1,12 @@
 // =====================================================
 // Leadflow Vloom - Saved searches list + Run + View outputs
 // =====================================================
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { Play, Loader2, Trash2, ArrowLeft, List, Pencil, Check, X, Send } from 'lucide-react';
 import { useSavedSearches } from '@/hooks/useSavedSearches';
 import { useLeads } from '@/hooks/useLeads';
 import { LeadsTable } from '@/components/LeadsTable';
-import { runJobSearchViaEdge, runLinkedInPostFeedViaEdge, sendSelectedToLeadsAndEnrich, recomputeLeadScores } from '@/lib/apify';
+import { runJobSearchViaEdge, runLinkedInPostFeedViaEdge, sendSelectedToLeadsAndEnrich, recomputeLeadScores, userHasActiveApifyKeyInSettings } from '@/lib/apify';
 import type { RunLinkedInSearchResult } from '@/lib/apify';
 import type { Lead, LeadStatus } from '@/types/database';
 import { supabase } from '@/lib/supabase';
@@ -439,6 +439,17 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
   const [viewingSearchId, setViewingSearchId] = useState<string | null>(null);
   /** Prevents double-submit while a Run request is in flight. */
   const runLockRef = useRef(false);
+  const [hasApifyKey, setHasApifyKey] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    userHasActiveApifyKeyInSettings().then((ok) => {
+      if (!cancelled) setHasApifyKey(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleRun = useCallback(
     async (id: string, actorId: string) => {
@@ -484,6 +495,14 @@ export function SavedSearchesView({ onRunComplete, onRunError }: SavedSearchesVi
         After a run, new rows show a <span className="text-vloom-text font-medium">New</span> badge next to the company
         in results until the next run.
       </p>
+
+      {hasApifyKey === false && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-100 p-4 text-sm mb-4">
+          No Apify key for this login. Re-running Post Feeds on the server often hits the 150s time
+          limit (0 results). Add your token in <span className="font-medium">Settings</span> so runs
+          happen in the browser.
+        </div>
+      )}
 
       {!supabase && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 p-4 text-sm mb-4">

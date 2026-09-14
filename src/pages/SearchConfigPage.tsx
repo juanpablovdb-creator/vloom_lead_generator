@@ -29,6 +29,7 @@ import {
   getApifyApiKeyForBrowser,
   POST_FEED_BROWSER_MAX_AUTHOR_PROFILES,
 } from "@/lib/apify";
+import { ApifyKeyForm } from "@/components/SettingsView";
 import { supabase } from "@/lib/supabase";
 import type { Lead } from "@/types/database";
 
@@ -434,6 +435,7 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       options: [
         { value: "Past 1 hour", label: "Past 1 hour" },
         { value: "Past 24 hours", label: "Past 24 hours" },
+        { value: "Past 72 hours", label: "Past 72 hours" },
         { value: "Past Week", label: "Past week" },
         { value: "Past Month", label: "Past month" },
       ],
@@ -528,6 +530,7 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
         { value: "any", label: "Any time" },
         { value: "1h", label: "Past 1 hour" },
         { value: "24h", label: "Past 24 hours" },
+        { value: "72h", label: "Past 72 hours" },
         { value: "week", label: "Past week" },
         { value: "month", label: "Past month" },
         { value: "3months", label: "Past 3 months" },
@@ -546,7 +549,7 @@ const ACTOR_INPUT_SCHEMAS: Record<string, ActorInputField[]> = {
       placeholder: "200",
       defaultValue: 200,
       helpText:
-        "Maximum posts to fetch per query (higher = more cost). Server-side runs cap at 100 posts (Edge 150s limit) and skip profile location scrape; add your Apify key in Settings to run in the browser without those caps.",
+        "Maximum posts to fetch per query (higher = more cost). Without an Apify key in Settings, the server caps at 100 posts and often times out at 150s if you also use author-location filters.",
       icon: <Hash className="w-4 h-4" />,
     },
     {
@@ -892,7 +895,10 @@ export function SearchConfigPage({
   const [renameDraft, setRenameDraft] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
-  const [postFeedBrowserApify, setPostFeedBrowserApify] = useState(false);
+  const [postFeedBrowserApify, setPostFeedBrowserApify] = useState<boolean | null>(
+    null,
+  );
+  const [postFeedSubmitHint, setPostFeedSubmitHint] = useState<string | null>(null);
 
   const inputSchema = useMemo(
     () => ACTOR_INPUT_SCHEMAS[source.apifyActorId] || [],
@@ -910,9 +916,13 @@ export function SearchConfigPage({
     setFormData(defaults);
   }, [source.apifyActorId, inputSchema]);
 
+  const refreshPostFeedApifyKey = () => {
+    getApifyApiKeyForBrowser().then((k) => setPostFeedBrowserApify(!!k));
+  };
+
   useEffect(() => {
     if (source.apifyActorId !== LINKEDIN_POST_SEARCH_ACTOR_ID) {
-      setPostFeedBrowserApify(false);
+      setPostFeedBrowserApify(null);
       return;
     }
     let cancelled = false;
@@ -968,8 +978,23 @@ export function SearchConfigPage({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPostFeedSubmitHint(null);
 
     if (!validateForm()) return;
+
+    const isPostFeed = source.apifyActorId === LINKEDIN_POST_SEARCH_ACTOR_ID;
+    if (isPostFeed && postFeedBrowserApify === false) {
+      const locations = String(formData.authorLocations ?? "").trim();
+      const maxPosts = Number(formData.maxPosts);
+      const heavy =
+        locations.length > 0 || (Number.isFinite(maxPosts) && maxPosts > 100);
+      if (heavy) {
+        setPostFeedSubmitHint(
+          "This search will likely hit the 150s server limit (author-location filter and/or Max posts over 100). Save your Apify key above so it runs in the browser, or clear location filters and set Max posts to 100 or less.",
+        );
+        return;
+      }
+    }
 
     setIsSearching(true);
     try {
@@ -1166,6 +1191,38 @@ export function SearchConfigPage({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {source.apifyActorId === LINKEDIN_POST_SEARCH_ACTOR_ID && (
+            <div
+              className={`rounded-xl border p-4 text-sm space-y-3 ${
+                postFeedBrowserApify
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-100"
+              }`}
+            >
+              {postFeedBrowserApify ? (
+                <p>
+                  Apify key found. This search will run in your <strong>browser</strong> (no 150s
+                  server cap), including author-location profile checks.
+                </p>
+              ) : (
+                <>
+                  <p className="font-medium">Apify key missing — searches often return 0 results</p>
+                  <p>
+                    Without a key, Post Feeds run on the server and stop at 150 seconds. Your usual
+                    setup (exclude countries + Max posts 200) hits that limit. Save your token here
+                    or in Settings, then Start Search.
+                  </p>
+                  <ApifyKeyForm
+                    onSaved={() => {
+                      refreshPostFeedApifyKey();
+                      setPostFeedSubmitHint(null);
+                    }}
+                  />
+                </>
+              )}
+            </div>
+          )}
+
           <div className="bg-vloom-surface rounded-xl border border-vloom-border p-6 space-y-6">
             <div className="flex items-center gap-2 text-sm font-medium text-vloom-muted uppercase tracking-wide">
               <Filter className="w-4 h-4" />
@@ -1181,6 +1238,12 @@ export function SearchConfigPage({
               </div>
             )}
           </div>
+
+          {postFeedSubmitHint && (
+            <p className="text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
+              {postFeedSubmitHint}
+            </p>
+          )}
 
           <button
             type="submit"

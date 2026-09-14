@@ -13,11 +13,12 @@ import { PersonasView } from '@/components/PersonasView';
 import { LeadsTable } from '@/components/LeadsTable';
 import { runJobSearchViaEdge, runLinkedInPostFeedViaEdge, recomputeLeadScores } from '@/lib/apify';
 import { SavedSearchesView } from '@/components/SavedSearchesView';
+import { SettingsView } from '@/components/SettingsView';
 import { useLeads } from '@/hooks/useLeads';
 
 const LAST_NAV_KEY = 'leadflow_last_nav';
 
-const SECTIONS: SectionId[] = ['tasks', 'personas', 'discovery', 'crm', 'kpis'];
+const SECTIONS: SectionId[] = ['tasks', 'personas', 'discovery', 'crm', 'kpis', 'settings'];
 const DISCOVERY_SUBS: DiscoverySubId[] = ['new-search', 'saved-searches', 'leads-lists'];
 
 function getLastNav(): { section: SectionId; discoverySub: DiscoverySubId } {
@@ -186,6 +187,7 @@ export function AppContent({ userEmail, onSignOut }: AppContentProps = {}) {
       )}
       {section === 'crm' && <CRMView />}
       {section === 'kpis' && <KPITrackingView />}
+      {section === 'settings' && <SettingsView />}
         </>
       )}
     </AppLayout>

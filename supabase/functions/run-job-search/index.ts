@@ -37,6 +37,8 @@ function toArray(v: unknown): string[] {
 function mapPostedLimitToApify(postedLimit: string): string {
   const s = (postedLimit || "").toLowerCase();
   if (s.includes("1h") || s.includes("1 hour")) return "1h";
+  // LinkedIn Jobs has no 72h — use week, then post-filter to 72h in import
+  if (s.includes("72") || s.includes("3 day") || s === "72h") return "week";
   if (s.includes("24") || s.includes("24h")) return "24h";
   if (s.includes("week") || s === "week") return "week";
   if (s.includes("month") || s === "month") return "month";

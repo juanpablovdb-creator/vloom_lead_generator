@@ -13,9 +13,10 @@ import {
   ChevronRight,
   LogOut,
   Target,
+  Settings,
 } from 'lucide-react';
 
-export type SectionId = 'tasks' | 'personas' | 'discovery' | 'crm' | 'kpis';
+export type SectionId = 'tasks' | 'personas' | 'discovery' | 'crm' | 'kpis' | 'settings';
 export type DiscoverySubId = 'new-search' | 'saved-searches' | 'leads-lists';
 
 export interface SidebarProps {
@@ -123,6 +124,9 @@ export function Sidebar({ activeSection, activeDiscoverySub, onNavigate, userEma
 
         {/* KPIs */}
         {navItem('kpis', 'KPIs', <BarChart3 className="w-4 h-4" />)}
+
+        {/* Settings */}
+        {navItem('settings', 'Settings', <Settings className="w-4 h-4" />)}
       </nav>
 
       <div className="p-3 border-t border-vloom-border space-y-2">

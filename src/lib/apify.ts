@@ -309,15 +309,59 @@ export async function getApifyApiKeyForBrowser(): Promise<string | null> {
   return row.api_key_encrypted;
 }
 
-async function userHasActiveApifyKeyInSettings(): Promise<boolean> {
+export async function userHasActiveApifyKeyInSettings(): Promise<boolean> {
   return (await getApifyApiKeyForBrowser()) != null;
+}
+
+/** Save (upsert) the current user's Apify token into `api_keys` so Post Feeds can run in the browser. */
+export async function saveApifyApiKeyForCurrentUser(apiKey: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase not configured.");
+  const trimmed = apiKey.trim();
+  if (!trimmed) throw new Error("Paste a non-empty Apify API token.");
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in to save your Apify key.");
+  const now = new Date().toISOString();
+  const { data: existing, error: selectErr } = await supabase
+    .from("api_keys")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("service", "apify")
+    .maybeSingle();
+  if (selectErr) throw selectErr;
+  const row = existing as { id?: string } | null;
+  if (row?.id) {
+    const { error } = await supabase
+      .from("api_keys")
+      .update({
+        api_key_encrypted: trimmed,
+        is_active: true,
+        updated_at: now,
+      } as never)
+      .eq("id", row.id);
+    if (error) throw error;
+    return;
+  }
+  const { error } = await supabase.from("api_keys").insert({
+    user_id: user.id,
+    service: "apify",
+    api_key_encrypted: trimmed,
+    is_active: true,
+  } as never);
+  if (error) throw error;
 }
 
 /** Params for running LinkedIn job search (HarvestAPI). From New Search form or saved_searches.input */
 export interface RunLinkedInSearchInput {
   jobTitles: string[];
   locations?: string[];
-  postedLimit?: "Past 1 hour" | "Past 24 hours" | "Past Week" | "Past Month";
+  postedLimit?:
+    | "Past 1 hour"
+    | "Past 24 hours"
+    | "Past 72 hours"
+    | "Past Week"
+    | "Past Month";
   maxItems?: number;
   sort?: "relevance" | "date";
   workplaceType?: string[];
@@ -348,6 +392,7 @@ export interface RunLinkedInPostFeedInput {
     | "any"
     | "1h"
     | "24h"
+    | "72h"
     | "week"
     | "month"
     | "3months"
@@ -557,6 +602,14 @@ function mapPostedLimitToApifyPostFeed(postedLimit: string): string {
   if (s === "any" || s.includes("any")) return "any";
   if (s.includes("1h") || s.includes("1 hour") || s.includes("past 1 hour"))
     return "1h";
+  // 72h before 24h so "Past 72 hours" does not match "24"
+  if (
+    s === "72h" ||
+    s.includes("72 hour") ||
+    s.includes("past 72") ||
+    s.includes("3 day")
+  )
+    return "72h";
   if (s.includes("24h") || s.includes("24 hours") || s.includes("past 24"))
     return "24h";
   if (s.includes("week") || s.includes("past week")) return "week";
@@ -567,10 +620,51 @@ function mapPostedLimitToApifyPostFeed(postedLimit: string): string {
   return "week";
 }
 
+/** Apify Post Feeds has no native 72h enum — use postedLimitDate (ISO). */
+function resolvePostFeedPostedFilter(postedLimitRaw: string): {
+  postedLimit?: string;
+  postedLimitDate?: string;
+} {
+  const mapped = mapPostedLimitToApifyPostFeed(postedLimitRaw);
+  if (mapped === "72h") {
+    const d = new Date(Date.now() - 72 * 60 * 60 * 1000);
+    return {
+      // LinkedIn-side upper bound; date filter tightens to 72h
+      postedLimit: "week",
+      postedLimitDate: d.toISOString(),
+    };
+  }
+  if (mapped === "any") return {};
+  return { postedLimit: mapped };
+}
+
+function isPast72HoursPostedLimit(postedLimit: string | null | undefined): boolean {
+  const s = (postedLimit || "").toLowerCase().trim();
+  return (
+    s === "72h" ||
+    s.includes("72 hour") ||
+    s.includes("past 72") ||
+    s.includes("3 day")
+  );
+}
+
+function postedAtWithinLastHours(
+  postedAt: string | null | undefined,
+  hours: number,
+): boolean {
+  if (!postedAt) return true;
+  const t = Date.parse(postedAt);
+  if (!Number.isFinite(t)) return true;
+  return t >= Date.now() - hours * 60 * 60 * 1000;
+}
+
 function buildPostFeedParamsClient(input: Record<string, unknown>): {
   searchQueries: string[];
   maxPosts: number;
-  postedLimit: string;
+  postedLimit?: string;
+  postedLimitDate?: string;
+  /** Original UI value (e.g. 72h) for filters / saved search display. */
+  postedLimitUi: string;
   sortBy: "relevance" | "date";
   authorLocations: string[];
   authorLocationMode: "include" | "exclude";
@@ -590,13 +684,13 @@ function buildPostFeedParamsClient(input: Record<string, unknown>): {
       [],
   );
   const maxPostsRaw = input.maxPosts ?? input.maxItems ?? 200;
-  const maxPosts =
+  const maxPostsParsed =
     typeof maxPostsRaw === "number" ? maxPostsRaw : Number(maxPostsRaw) || 200;
+  const maxPosts = Math.min(Math.max(1, maxPostsParsed), 2000);
   const sortByRaw = pStr(input.sortBy ?? input.sort ?? "date").toLowerCase();
   const sortBy = sortByRaw === "relevance" ? "relevance" : "date";
-  const postedLimit = mapPostedLimitToApifyPostFeed(
-    pStr(input.postedLimit ?? "week"),
-  );
+  const postedLimitUi = pStr(input.postedLimit ?? "week");
+  const timeFilter = resolvePostFeedPostedFilter(postedLimitUi);
   const authorLocations = toArrayPost(
     input.authorLocations ?? input.locations ?? [],
   );
@@ -605,22 +699,26 @@ function buildPostFeedParamsClient(input: Record<string, unknown>): {
     .trim();
   const authorLocationMode =
     authorLocationModeRaw === "exclude" ? "exclude" : "include";
-  // Location filtering requires extra profile scraping; browser path allows more than Edge (48).
   const maxAuthorUrlsToScrapeRaw =
-    input.maxAuthorUrlsToScrape ?? input.maxAuthorProfiles ?? 200;
-  const parsedAuthorCap =
+    input.maxAuthorUrlsToScrape ??
+    input.maxAuthorProfiles ??
+    POST_FEED_BROWSER_MAX_AUTHOR_PROFILES;
+  const parsed =
     typeof maxAuthorUrlsToScrapeRaw === "number"
       ? maxAuthorUrlsToScrapeRaw
-      : Number(maxAuthorUrlsToScrapeRaw) || 200;
+      : Number(maxAuthorUrlsToScrapeRaw) ||
+        POST_FEED_BROWSER_MAX_AUTHOR_PROFILES;
   const maxAuthorUrlsToScrape = Math.min(
-    Math.max(1, parsedAuthorCap),
+    Math.max(0, parsed),
     POST_FEED_BROWSER_MAX_AUTHOR_PROFILES,
   );
 
   return {
     searchQueries,
     maxPosts,
-    postedLimit,
+    postedLimit: timeFilter.postedLimit,
+    postedLimitDate: timeFilter.postedLimitDate,
+    postedLimitUi,
     sortBy,
     authorLocations,
     authorLocationMode,
@@ -1030,10 +1128,11 @@ async function runLinkedInPostFeedBrowser(options: {
   const searchQuery = params.searchQueries.join(", ");
   const searchFilters: Record<string, unknown> = {
     searchQueries: params.searchQueries,
-    postedLimit: params.postedLimit,
+    postedLimit: params.postedLimitUi,
     maxPosts: params.maxPosts,
     sortBy: params.sortBy,
   };
+  if (params.postedLimitDate) searchFilters.postedLimitDate = params.postedLimitDate;
   if (params.authorLocations?.length)
     searchFilters.authorLocations = params.authorLocations;
   if (params.contentType) searchFilters.contentType = params.contentType;
@@ -1116,9 +1215,10 @@ async function runLinkedInPostFeedBrowser(options: {
     const apifyInput: Record<string, unknown> = {
       searchQueries: params.searchQueries,
       maxPosts: params.maxPosts,
-      postedLimit: params.postedLimit,
       sortBy: params.sortBy,
     };
+    if (params.postedLimit) apifyInput.postedLimit = params.postedLimit;
+    if (params.postedLimitDate) apifyInput.postedLimitDate = params.postedLimitDate;
     if (params.contentType) apifyInput.contentType = params.contentType;
     if (params.authorUrls?.length) apifyInput.authorUrls = params.authorUrls;
     if (params.authorsCompanies?.length)
@@ -1131,7 +1231,10 @@ async function runLinkedInPostFeedBrowser(options: {
       apifyInput.authorKeywords = params.authorKeywords;
 
     const items = await client.runLinkedInPostSearch(apifyInput);
-    const posts = normalizeLinkedInPostsClient(items);
+    let posts = normalizeLinkedInPostsClient(items);
+    if (isPast72HoursPostedLimit(params.postedLimitUi)) {
+      posts = posts.filter((p) => postedAtWithinLastHours(p.postedAt, 72));
+    }
     const totalFromApify = posts.length;
 
     const locationNeedles = (params.authorLocations ?? [])
@@ -1402,7 +1505,7 @@ function formatPostFeedEdgeComputeError(original: string): string {
   if (/idle timeout|150s|wall.?clock|cpu time|worker.*limit/i.test(original)) {
     return [
       "Post Feeds hit the Supabase Edge 150s time limit.",
-      "Fix: add your Apify API key in Settings so the search runs in your browser (no Edge cap),",
+      "Fix: add your Apify API key in Settings (sidebar) so the search runs in your browser (no Edge cap),",
       "or lower Max posts / clear author-location filters / use a shorter Posted limit.",
       `Detail: ${original}`,
     ].join(" ");
@@ -2074,6 +2177,13 @@ function toApifyActorId(actorId: string): string {
 function mapPostedLimitToApify(postedLimit: string): string {
   const s = (postedLimit || "").toLowerCase();
   if (s.includes("1h") || s.includes("1 hour")) return "1h";
+  // LinkedIn Jobs has no 72h — use week, then post-filter to 72h
+  if (
+    s.includes("72") ||
+    s.includes("3 day") ||
+    s === "72h"
+  )
+    return "week";
   if (s.includes("24") || s === "24h") return "24h";
   if (s.includes("week") || s === "week") return "week";
   if (s.includes("month") || s === "month") return "month";
@@ -2272,7 +2382,12 @@ export class ApifyClient {
   async searchLinkedInJobs(params: {
     jobTitles: string[];
     locations?: string[];
-    postedLimit?: "Past 1 hour" | "Past 24 hours" | "Past Week" | "Past Month";
+    postedLimit?:
+      | "Past 1 hour"
+      | "Past 24 hours"
+      | "Past 72 hours"
+      | "Past Week"
+      | "Past Month";
     maxItems?: number;
     sort?: "relevance" | "date";
     workplaceType?: string[];
@@ -2327,7 +2442,11 @@ export class ApifyClient {
 
     const items =
       await this.getDatasetItems<Record<string, unknown>>(datasetId);
-    return this.normalizeHarvestApiJobs(items);
+    let jobs = this.normalizeHarvestApiJobs(items);
+    if (isPast72HoursPostedLimit(String(params.postedLimit ?? ""))) {
+      jobs = jobs.filter((j) => postedAtWithinLastHours(j.postedAt, 72));
+    }
+    return jobs;
   }
 
   /** HarvestAPI linkedin-post-search: raw items after run finishes (poll up to global timeout). */

@@ -92,6 +92,8 @@ Items en ejecución esta semana. 80-90% claros.
 - [x] CRM: budget + pipeline weight (Positive reply / Negotiation); stage Nurturing + monthly follow-up task
 - [x] Tasks: wipe old tasks; board Backlog / In progress / Done; presets; open card → lead; chips on CRM cards
 - [x] Lead popup: editable links + company/contact/LinkedIn/job URLs when scrape missed data
+- [x] Post Feeds: banner + Settings to save Apify key; block heavy searches without key (avoid 150s / 0 results)
+- [x] New Search: Past 72 hours timeframe (Jobs + Post Feeds)
 
 ---
 
