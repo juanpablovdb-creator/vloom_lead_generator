@@ -6,7 +6,9 @@ Registro de lo hecho, pendiente de limpieza y enlace a deuda técnica.
 
 ## Hecho recientemente
 
+- **Post Feeds — “Failed to fetch”:** El error crudo del navegador (sin respuesta HTTP) ahora se reintenta contra Apify y, si sigue, explica conexión / ad blocker / clave. Si Edge no responde, se intenta el path del navegador aunque el error no sea `FunctionsFetchError`.
 - **New Search — Past 72 hours:** Opción en LinkedIn Jobs y Post Feeds. Post Feeds usa `postedLimitDate` (Apify no tiene enum 72h) + filtro local; Jobs mapea a `week` en Apify y filtra a 72h al importar.
+- **Post Feeds — race on key check:** El guard de búsquedas “heavy” sin clave solo miraba `postFeedBrowserApify === false`; con estado inicial `null` se podía saltar. Ahora se resuelve la clave al submit y el botón queda disabled mientras carga.
 - **Post Feeds — key missing UX:** Banner + inline save of Apify token on the Post Feeds form; **Settings** in the sidebar; block Start Search when there is no key and the config is heavy (location filter or Max posts > 100). Avoids waiting 150s for 0 results. Saved searches warn if the key is missing.
 - **CRM / Tasks overhaul (budget, Nurturing, task board):** Campo `budget` + peso de pipeline en Positive reply / Negotiation; etapa **Nurturing** con follow-up mensual auto; tasks reseteados a Kanban **Backlog / In progress / Done** con presets (Follow up, Send Quote, Send Sample, etc.); links editables + campos LinkedIn/website/contacto/job editable; ya no se crean tasks “Contact …” al marcar lead. Migración `027_budget_links_nurturing_tasks.sql` (aplicar en Supabase).
 - **KPIs vs CRM — discrepancia First contact:** La cohorte KPI mezclaba historial + `is_marked_as_lead` y queries sin paginar (tope 1000), mientras el CRM filtra solo por `first_contacted_at` (y puede mostrar no marcados). Ahora KPI usa el mismo campo/fechas que el CRM, pagina con `fetchAllPages`, no exige marked, y las cards del CRM ya no inventan fecha con `updated_at`.

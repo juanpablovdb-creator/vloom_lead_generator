@@ -983,16 +983,25 @@ export function SearchConfigPage({
     if (!validateForm()) return;
 
     const isPostFeed = source.apifyActorId === LINKEDIN_POST_SEARCH_ACTOR_ID;
-    if (isPostFeed && postFeedBrowserApify === false) {
-      const locations = String(formData.authorLocations ?? "").trim();
-      const maxPosts = Number(formData.maxPosts);
-      const heavy =
-        locations.length > 0 || (Number.isFinite(maxPosts) && maxPosts > 100);
-      if (heavy) {
-        setPostFeedSubmitHint(
-          "This search will likely hit the 150s server limit (author-location filter and/or Max posts over 100). Save your Apify key above so it runs in the browser, or clear location filters and set Max posts to 100 or less.",
-        );
-        return;
+    if (isPostFeed) {
+      // Resolve key at submit time — state may still be null while useEffect loads.
+      let hasBrowserKey = postFeedBrowserApify === true;
+      if (postFeedBrowserApify !== true) {
+        const key = await getApifyApiKeyForBrowser();
+        hasBrowserKey = !!key;
+        setPostFeedBrowserApify(hasBrowserKey);
+      }
+      if (!hasBrowserKey) {
+        const locations = String(formData.authorLocations ?? "").trim();
+        const maxPosts = Number(formData.maxPosts);
+        const heavy =
+          locations.length > 0 || (Number.isFinite(maxPosts) && maxPosts > 100);
+        if (heavy) {
+          setPostFeedSubmitHint(
+            "This search will likely hit the 150s server limit (author-location filter and/or Max posts over 100). Save your Apify key above so it runs in the browser, or clear location filters and set Max posts to 100 or less.",
+          );
+          return;
+        }
       }
     }
 
@@ -1194,12 +1203,17 @@ export function SearchConfigPage({
           {source.apifyActorId === LINKEDIN_POST_SEARCH_ACTOR_ID && (
             <div
               className={`rounded-xl border p-4 text-sm space-y-3 ${
-                postFeedBrowserApify
+                postFeedBrowserApify === true
                   ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
                   : "border-amber-500/40 bg-amber-500/10 text-amber-100"
               }`}
             >
-              {postFeedBrowserApify ? (
+              {postFeedBrowserApify === null ? (
+                <p className="flex items-center gap-2 text-vloom-muted">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Checking Apify key…
+                </p>
+              ) : postFeedBrowserApify ? (
                 <p>
                   Apify key found. This search will run in your <strong>browser</strong> (no 150s
                   server cap), including author-location profile checks.
@@ -1247,13 +1261,23 @@ export function SearchConfigPage({
 
           <button
             type="submit"
-            disabled={isSearching}
+            disabled={
+              isSearching ||
+              (source.apifyActorId === LINKEDIN_POST_SEARCH_ACTOR_ID &&
+                postFeedBrowserApify === null)
+            }
             className="w-full flex items-center justify-center gap-3 px-6 py-3.5 bg-vloom-accent text-white font-medium rounded-xl hover:bg-vloom-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isSearching ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
                 Searching...
+              </>
+            ) : source.apifyActorId === LINKEDIN_POST_SEARCH_ACTOR_ID &&
+              postFeedBrowserApify === null ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Checking key…
               </>
             ) : (
               <>

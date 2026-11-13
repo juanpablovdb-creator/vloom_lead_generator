@@ -1487,16 +1487,19 @@ async function runLinkedInPostFeedBrowser(options: {
         .join(" "),
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const wrapped = isBrowserNetworkError(err)
+      ? explainBrowserNetworkError("Apify", err)
+      : err;
+    const message = wrapped instanceof Error ? wrapped.message : String(wrapped);
     await supabase
       .from("scraping_jobs")
       .update({
         status: "failed",
-        error_message: message,
+        error_message: message.slice(0, 500),
         completed_at: new Date().toISOString(),
       } as never)
       .eq("id", scrapingJobId);
-    throw err;
+    throw wrapped;
   }
 }
 
@@ -1601,15 +1604,11 @@ export async function runLinkedInPostFeedViaEdge(options: {
       };
     }
 
-    if (error instanceof FunctionsFetchError) {
-      const msg = error.message;
-      const isUnreachable = /fetch failed|NetworkError|Failed to fetch/i.test(
-        msg,
-      );
-      if (isUnreachable || isPostFeedEdgeTimeoutError(msg)) {
-        return tryBrowserAfterEdgeTimeout(msg);
-      }
-      throw new Error(formatPostFeedEdgeComputeError(msg));
+    const invokeMsg = error instanceof Error ? error.message : String(error);
+    const invokeUnreachable =
+      error instanceof FunctionsFetchError || isBrowserNetworkError(error);
+    if (invokeUnreachable || isPostFeedEdgeTimeoutError(invokeMsg)) {
+      return tryBrowserAfterEdgeTimeout(invokeMsg);
     }
 
     const httpRes = getHttpResponseFromInvokeError(error);
@@ -2242,13 +2241,42 @@ function parseApifyError(errText: string): string {
 
 const APIFY_DATASET_FETCH_MAX_ATTEMPTS = 6;
 
+function isBrowserNetworkError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /failed to fetch|fetch failed|networkerror|network error|load failed|econnreset|etimedout/i.test(
+    msg,
+  );
+}
+
+/** Browser `TypeError: Failed to fetch` has no status — say where the request was going. */
+function explainBrowserNetworkError(target: string, err: unknown): Error {
+  const detail = err instanceof Error ? err.message : String(err);
+  return new Error(
+    [
+      `Could not reach ${target} (${detail}).`,
+      "The browser blocked or dropped the request before any response.",
+      "Check your connection, turn off ad blockers for this site, and confirm the Apify key in Settings.",
+      "If Post Feeds still fails, lower Max posts to 100 and clear author-location filters so it can run on the server.",
+    ].join(" "),
+  );
+}
+
 /** Retries on 429 / 502 / 503 / 504 (Apify gateway hiccups). */
 async function fetchApifyDatasetJsonWithRetry(
   url: string,
   headers: Record<string, string>,
 ): Promise<unknown> {
   for (let attempt = 1; attempt <= APIFY_DATASET_FETCH_MAX_ATTEMPTS; attempt++) {
-    const response = await fetch(url, { headers });
+    let response: Response;
+    try {
+      response = await fetch(url, { headers });
+    } catch (err) {
+      if (!isBrowserNetworkError(err) || attempt === APIFY_DATASET_FETCH_MAX_ATTEMPTS) {
+        throw explainBrowserNetworkError("Apify", err);
+      }
+      await new Promise((r) => setTimeout(r, 800 * attempt));
+      continue;
+    }
     if (response.ok) {
       return response.json();
     }
@@ -2292,14 +2320,23 @@ export class ApifyClient {
     const maxAttempts = 5;
     let lastErrText = "";
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...this.headers,
-        },
-        body: JSON.stringify(input),
-      });
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...this.headers,
+          },
+          body: JSON.stringify(input),
+        });
+      } catch (err) {
+        if (!isBrowserNetworkError(err) || attempt === maxAttempts) {
+          throw explainBrowserNetworkError("Apify", err);
+        }
+        await new Promise((r) => setTimeout(r, 800 * attempt));
+        continue;
+      }
 
       if (response.ok) {
         const data = await response.json();
@@ -2337,9 +2374,14 @@ export class ApifyClient {
   async getRunStatus(
     runId: string,
   ): Promise<{ status: string; datasetId?: string }> {
-    const response = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, {
-      headers: this.headers,
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${APIFY_BASE_URL}/actor-runs/${runId}`, {
+        headers: this.headers,
+      });
+    } catch (err) {
+      throw explainBrowserNetworkError("Apify", err);
+    }
 
     if (!response.ok) {
       const errText = await response.text();
